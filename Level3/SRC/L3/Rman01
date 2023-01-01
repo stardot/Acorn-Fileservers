@@ -136,9 +136,6 @@ RDOPEN JSR INITRD ;INITIALISE MCNUMB,&GETPTR:=USERINFO,RNDPTR
  ANDIM TYPDIR
  BNE RDOPNE ;Branch if directory
 
- ANDIM TYPDIR
- BNE RDOPNE ;Branch if directory
-
 ;The object is a file: must check that it can be opened
 ;for the requested access. (A file may be held open by
 ;a single writer, or by multiple readers).

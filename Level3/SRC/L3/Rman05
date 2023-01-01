@@ -42,6 +42,7 @@ GETRNB LDAIY RTEPTR ;Get an "in use" byte
 ;Y contains offset of its "in use" byte in RANDTB
 
 GETRNA
+ [ 1=0 ; A USELESS BIT OF CODE *** LH 15/12/85 ***
  TYA
  SEC
  SBCIM RTINUS ;Y := offset of ENTRY in RANDTB
@@ -55,6 +56,11 @@ GETRNA
  STA RTEPTR + 1
  LDAIM 0
  RTS
+ |
+ LDAIM  0 ;Set RC THIS IS ALL IT DOES LH
+ TAY
+ RTS
+ ]
 
 
 ;*** RDCKAC ***
@@ -186,8 +192,8 @@ RDFLSH LDAIM  9 ;STRMAN.FLUSH ALLDIRTYWONDOWS
 RDFLLA JSR SETRTN
  JSR RDDSIN ;Put disc and SIN on stack
 
- JSR STRMAN ;*** Call STRMAN **
- RTS
+ JMP STRMAN ;*** Call STRMAN **
+
 
 ;*** RDSHWM ***
 

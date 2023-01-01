@@ -109,7 +109,7 @@ PTBYTZ JMP COMRTS ;exit
 
 CPRDAR JSR GETUSE ;USTPTR := USERTB entry
  BEQ CPRDAA ;OK, continue
-
+ JMP CPRDAX
 
 CPRDAB JMP ERROR
 
@@ -184,7 +184,7 @@ CPRDAX JMP COMRTS ;Exit
 CPSTAR JSR GETUSE ;USTPTR := ptr to user info
  BEQ CPSTAA ;OK, continue
 
- JMP ERROR
+ JMP CPRDAX ;exit
 
 CPSTAA JSR SETUSR ;Copy user info to stack
  LDX BPTR ;Offset of request buffer
@@ -449,6 +449,7 @@ PBYTED
  STA RTCODE
  BNE PBYTEX ;RC <> 0 => error
  STA CCODE ;Set command code = 0
+ STA MIDTX+4 ;send 32 bit number
  LDX BPTR
  LDAAX MIDRX + 2
  STA MIDTX + 1
@@ -456,7 +457,7 @@ PBYTED
  STA MIDTX + 2
  LDAAX MIDRX + 4 ;Move length of data to MIDTX
  STA MIDTX + 3
- LDAIM TXHDR + 4
+ LDAIM TXHDR + 5
  JSR REPLYC ;Send reply (note MIDTX undefined)
 
 PBYTEZ JMP COMRTS ;Exit from command
@@ -676,7 +677,9 @@ GBYTEB LDA DSCERR
  STA MIDTX + 2 ;CS
  LDA GBBXFD + 2
  STA MIDTX + 3 ;MS
- LDAIM TXHDR + 4
+ LDAIM 0
+ STA MIDTX+4 ;send 32 bit number ** 26/2/85 **
+ LDAIM TXHDR + 5 ;Message length
  JSR REPLYC ;Send reply
  JMP GBYTEZ ;Exit from command
 
@@ -716,4 +719,33 @@ RMSUBA LDAAX MIDRX + 1
 
  JMP RNDMAN ;**** Call RNDMAN.SUBO & return ***
 
+CPWHO ROUT ;** 19/3/85 **
+
+;Yet another interface - this one allows an application
+;to determine the userid under which it is logged-on
+
+;This is probably most useful for MAILing type progs
+
+ JSR GETUSE
+ BNE #20 ;nb this will deal with the error
+
+ LDXIM 0
+ LDYIM UTUSID
+10 LDAIY USTPTR ;copy the user name
+ STAAX MIDTX
+ INY
+ INX
+ CMPIM CR ;copy only upto CR (pw follows - dont want that)
+ BNE #10
+
+ TXA
+ CLC
+ ADCIM TXHDR ; Add TX header length *** LH 28/8/85 ***
+ [ 1=1
+ JMP DATOUT
+ |
+ JSR REPLYC ;return the answer with zero RC
+ ]
+20 JMP COMRTS
+ 
  LNK UADE20
