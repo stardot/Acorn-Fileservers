@@ -77,10 +77,15 @@ The assembler directive flag for the Winchester being present is &00. If set to 
 Software Protection
 ===================
 Version numbers
+
 1.01 23AES240100418
+
 1.03 24AES240200625
+
 1.04
+
 1.06 24AES242001080
+
 1.07 24AES243002000
 
 These replace the text  "Version string" found in line 30 of the source file UADE03. It is believed the file server binary "FS" had to be placed at the start of side 2 on the installation disc, and the install routine would apply this number when copying the binary.
