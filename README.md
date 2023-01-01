@@ -1,5 +1,5 @@
 Notes on Level3 and Source Code and versions
-===============++++=========================
+============================================
 
 The goal of this project was to use the Level3 0.6 source code, Level3 1.31 souce code and the FileStore 1.31 source code to recreate source code for all the different known binaries. This was to identify precisely what changes were made between the version releases as no known documentation is available.
 
