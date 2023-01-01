@@ -1,7 +1,7 @@
 Notes on Level3 and Source Code and versions
 ============================================
 
-The goal of this project was to use the Level3 0.6 source code, Level3 1.31 souce code and the FileStore 1.31 source code to recreate source code for all the different known binaries. This was to identify precisely what changes were made between the version releases as no known documentation is available.
+The goal of this project was to use the Level3 1.06 source code, Level3 1.31 souce code and the FileStore 1.31 source code to recreate source code for all the different known binaries. This was to identify precisely what changes were made between the version releases as no known documentation is available.
 
 The source code for v1.06 is thought to be the original and create a binary identical to an orginal 1.06 disk set albeit without the serial number. The file set on the disc had been updated to assemble on an Archimedes under the 6502 Turbo Co-Processor emulator at some point - most likely at Acorn.
 
