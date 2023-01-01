@@ -1,0 +1,1180 @@
+ OPT UADE20 ;FILE > Uade20
+ TTL File server file UADE20
+
+
+;C O M M A N D  P R O C E S S O R
+
+;U T I L I T I E S
+
+
+
+
+RCODE
+
+;Check return code in A. If 0, send
+;3 byte message. If not, go to error
+;routine
+;Command code always set 0.
+
+ PHA
+ LDAIM  0
+ STA CCODE
+ PLA
+ TAY
+ BEQ REPLYA
+ JMP EXTERR
+
+
+REPLYA
+
+;Sends a zero return code to client.
+;Sets RC into TXBUF and drops through into
+;REPLY, passing a the header length as message length
+
+ LDAIM TXHDR
+REPLYC LDXIM  0 ;Set R.code
+ STX RTCODE
+
+REPLY
+
+;Sends a message of length A to client
+;on the reply port (in var RPLYPT).
+
+ LDX RPLYPT
+
+REPLYB
+
+;Sends a message of length A on port X
+;to client.
+
+
+ LDY QPTR ;Get CB pointer
+ CLC
+ ADCIM TXBUF
+ STAAY CBBUFE ;Buffer end ptr. (lo)
+ LDAIM  0 ;Assumed msg. length < 255
+
+ STAAY CBBUF + 2
+ STAAY CBBUF + 3 ;hi order addresses
+ STAAY CBBUFE + 2
+ STAAY CBBUFE + 3 ;from 2nd processor
+
+ ADCIM /(TXBUF )
+ STAAY CBBUFE + 1 ;Buffer end ptr (hi)
+
+ LDAIM TXBUF
+ STAAY CBBUF ;Buffer ptr lo
+ LDAIM /(TXBUF )
+ STAAY CBBUF + 1 ;BUffer ptr hi
+ TXA  ;Set port
+ STAAY CBPORT
+
+
+SEND
+
+;Entry point used when CB set up elsewhere
+;(e.g. LOAD/EXAMINE). Assumed all is
+;set but TX flag.
+
+ LDAIM TXFLAG
+ ORAAY CBFLG
+ STAAY CBFLG
+
+ LDAIM TXRPT
+ LDYIM TXDLY ;Delay between tries
+
+
+;XMIT
+
+;A = no. of times to try transmit
+;Y = delay between tries
+;NETCB = page zero pointer to control block
+
+ STA TXJ
+ STY TXD
+ LDYIM  0
+ LDAIY NETCB
+ STA TXF ;flag byte
+XLP LDX NETCB ;Pointers to CBlock
+ LDY NETCB + 1
+ LDAIM &10
+ JSR OSWORD ;call Tx
+
+ LDYIM  0
+ LDAIY NETCB ;check for Tx on Tx
+ BNE XLP2
+ LDA TXF
+ STAIY NETCB
+ BNE XLP ;restore flga byte and try again
+
+XLP2 LDAIM  50
+ JSR OSBYTE
+ TXA
+ BMI XLP2 ;poll 'til done
+ BEQ XMITEX ;Yes => success => exit
+ DEC TXJ ;No. of times decrement
+ BEQ XERR ;All done => failure
+ LDY TXD ;Delay time
+ JSR MSDELY ;Do delay
+ JMP XLP ;Do again
+XERR TXA ;Return flag in A
+XMITEX RTS
+
+
+WAIT
+
+;Wait to receive from client.
+;Control block pointed by QPTR, wait
+;is a constant (WAITCL) no. of msecs.
+
+ LDAIM RXFLAG
+ STA CBFLG ;CB is ammended for Rx, so open it
+
+ LDXIM &00
+ STX RXCBN
+ LDAIM &11
+ LDXIM RXCBN
+ LDYIM /(RXCBN )
+ JSR OSWORD
+
+ LDXIM  50
+ STX TIMER2
+ LDXIM WAITCL
+ STX TIMER1
+WAITLA LDAIM ONEMS ;One msec loop
+ STA TIMER ;(2cycles)
+WAITLB LDX RXCBN ;(4usecs)
+ LDAIM  51
+ JSR OSBYTE ;poll Rx
+ TXA
+ BMI WAITEX ;(2)
+ DEC TIMER ;(5) timer not p.0
+ BNE WAITLB ;(3)
+ DEC TIMER1  ;(2)
+ BNE WAITLA ;(3)
+ DEC TIMER2
+ BNE WAITLA
+
+;Total inner loop time = 14 cycles
+;So ONEMS = 71 (decimal)
+
+WAITEX LDXIM RXCBN
+ LDYIM /(RXCBN )
+ LDAIM &11
+ JSR OSWORD ;read the control block
+
+ LDAIM  0
+ BIT RXCBN + 1 ;read flag byte
+ BMI WAITOK
+ LDAIM WAITER ;timeout
+
+WAITOK RTS
+
+ERROR JSR EXTERR
+ JMP COMRTS
+
+EXOPEN CMPIM RDERRH ;** 17/9/84 **
+ BNE EXTERR
+
+ JSR LOOKER
+
+ LDYIM ARGD
+ LDAIY NEWARG
+ BEQ EXOPL1 ;net number
+
+ STX COTEMP
+ JSR MKDEC ;convert to decimal
+ JSR EXOPR1 ;write into the buffer
+ LDAIM "."
+ STAAX MIDTX ;add separator
+ INX
+
+EXOPL1 LDYIM ARGC
+ LDAIY NEWARG ;station number
+ STX COTEMP
+ JSR MKDEC ;convert ..
+ JSR EXOPR1 ;append to end of message
+EXOPLB LDAIM CR
+ STAAX MIDTX
+ BNE EXOPLA
+
+EXTERR
+
+;Puts error code in A into TXBUF +02.
+;Looks A up in ERRTAB and if found, puts text into
+;message.
+;If not found, uses text F.S. ERROR xx (xx is A
+;in hex).
+;Message then send to client using REPLY.
+;CCODE always set to zero in LOOKER
+
+ PHA
+ JSR LOOKER ;Find error in table etc.
+ PLA ;** 17/9/84 **
+ CMPIM RDERRH
+ BNE EXOPLA           
+ LDXIM 12
+ BNE EXOPLB
+
+EXOPLA TXA  ;Message length for REPLY
+ SEC  ;Set carry to add 1 for CR
+ ADCIM TXHDR ;Add header length to message length
+
+ JMP REPLY ;Send and return
+
+
+
+
+EXOPR1 LDYIM :LSB: -3
+ LDX COTEMP ;restore X value
+EXOPR2 LDAAY COWORK - :LSB: -3 ;get results from MKDEC
+ CMPIM SPACE
+ BEQ EXOPR3
+ STAAX MIDTX ;put text in buffer
+ INX
+EXOPR3 INY
+ BNE EXOPR2
+ RTS
+
+
+LOOKER
+
+;Look error in A up and put relevant message
+;at MIDTX.
+
+ STA RTCODE
+ PHA
+
+
+ LDAIM ERRTAB
+ STA GENPTR
+ LDAIM /(ERRTAB )
+ STA GENPTR + 1
+ LDYIM  0
+ STY CCODE ;Set command code to zero
+ERRLUP PLA
+ CMPIY GENPTR ;Check error number
+ BEQ ERRFND ;Found
+
+ PHA
+ LDAIM CR
+INCWHY INY
+ BNE EXTELA
+ INC GENPTR + 1
+EXTELA CMPIY GENPTR ;Move to end of this text
+ BNE INCWHY
+
+ INY
+ BNE EXTONA
+ INC GENPTR + 1
+EXTONA LDAIY GENPTR
+ BNE ERRLUP ;Non-zero => not end of table
+
+;If here, number not found, so construct
+;default error message.
+
+ LDXIM  0
+EELP LDAAX ERRMSG ;Load error text
+ BMI EELPE ;Terminated by NOP
+ STAAX MIDTX ;Store in transmit buffer
+ INX
+ BNE EELP
+
+EELPE PLA  ;Get error number back
+ JSR WRTERR ;Put A in hex in message at X
+
+ LDAIM CR
+ STAAX MIDTX ;Terminate message
+ JMP LOOKRX
+
+
+ERRFND LDXIM &FF ;Error found, move text to message
+ERRFLA INX
+ INY
+ BNE ERRFON
+ INC GENPTR + 1
+ERRFON LDAIY GENPTR
+ STAAX MIDTX
+ CMPIM CR
+ BNE ERRFLA
+
+LOOKRX RTS  ;Complete, exit X - length-1
+
+
+
+WRTERR PHA
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ JSR WERR ;TOP NYBBLE
+
+ PLA
+WERR ANDIM &F
+ CMPIM &A
+ BCC WEON
+ ADCIM  6
+WEON ADCIM &30
+ STAAX MIDTX
+ INX
+ RTS
+
+
+ERRMSG = "F.S. Error "
+ NOP
+
+
+SENDBB   ;SENDBB
+
+;Send big block on port in A.
+;Size of message is in OUTBSZ,
+;assumes station already set.
+
+SENDBC LDY QPTR
+ STAAY CBPORT
+ CLC
+ LDA BBUF ;Buffer address
+ STAAY CBBUF
+ ADC OUTBSZ
+ STAAY CBBUFE
+ LDA BBUF + 1
+ STAAY CBBUF + 1
+ ADC OUTBSZ + 1
+ STAAY CBBUFE + 1
+
+ JMP SEND ;Send message  ...
+
+SENDIO LDY QPTR ;routine to send the IO side buffer
+ STAAY CBPORT ;in byte-size chunks ** 19/1/84 **
+
+ CLC
+ LDA IOBUF
+ STA COTEMP
+ ADC OUTBSZ
+ STA OUTBSZ
+ LDA IOBUF +1
+ STA COTEMP +1
+ ADC OUTBSZ +1
+ STA OUTBSZ +1 ;COTEMP is low end of buffer
+
+ LDAIM &FF
+ STAAY CBBUF+2
+ STAAY CBBUF+3
+ STAAY CBBUFE+2
+ STAAY CBBUFE+3 ;initialise top bytes
+
+SENDLP LDY QPTR
+ CLC
+
+ LDA COTEMP
+ STAAY CBBUF
+ ADCIM BUFSZ
+ STAAY CBBUFE
+ STA COTEMP
+
+ LDA COTEMP+1
+ STAAY CBBUF+1
+ ADCIM /BUFSZ
+ STAAY CBBUFE+1
+ STA COTEMP+1 ;buffer pointers set, new COTEMP set
+
+ LDAAY CBBUFE
+ CMP OUTBSZ
+ LDAAY CBBUFE+1
+ SBC OUTBSZ+1
+ BCC SENDL1 ;C=1 if cbbufe>= outbsz
+
+ LDA OUTBSZ
+ STAAY CBBUFE
+ LDA OUTBSZ+1
+ STAAY CBBUFE+1 ;setup last transmission
+
+SENDL1 PHP
+ JSR SEND ;do transmit
+ PLP ;restore carry
+ TAX
+ BNE SENDL2 ;bad transmit
+ BCC SENDLP
+SENDL2 RTS
+
+
+
+MSDELY CPYIM  0
+ BEQ DELYEX ;If no delay, Exit
+ PHA  ;Keep Acc.
+ TXA
+ PHA  ;Keep X
+ LDXIM  0
+ TYA  ;Keep delay time (in msecs)
+ PHA
+ SEC
+ SBCIM  30 ;subtract 30 ys for polling loop
+ CMPIM &E3
+ BCS DLPP1 ;skip , ok
+ TAY
+DLPP DEX
+ BNE DLPP ;1msec loop
+ DEY
+ BNE DLPP ;Outer loop
+DLPP1 PLA
+ TAY  ;Reset delay time
+ PLA
+ TAX  ;Reset X
+ PLA  ;Reset A
+DELYEX RTS
+
+
+
+;*** NON - NET  UTILITIES ***
+
+
+CPDNAM
+
+;Read disc name of disc number at ARGF on stack
+;into MIDTX offset by A.
+
+ PHA ;Push MIDTX offset
+
+ LDYIM ARGF
+ LDAIY NEWARG ;GET DISC NO.
+ PHA
+ INY
+ LDAIY NEWARG ;SET ON STACK AT ARGB
+ LDYIM ARGC
+ STAIY NEWARG
+ DEY
+ PLA
+ STAIY NEWARG
+ LDAIM &B ;MAPMAN ENTRY PT.
+ JSR SETRTN
+ JSR MAPMAN
+ BNE CPDNMX
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ STA GENPTR
+ INY
+ LDAIY NEWARG
+ STA GENPTR + 1 ;SET PTR. TO DISC NAME
+
+ PLA ; Offset from MIDTX
+ TAX
+ LDYIM  0
+CHDRLD LDAIY GENPTR
+ STAAX MIDTX
+ INX
+ INY
+ CPYIM DNAMLN
+ BNE CHDRLD
+
+  ;Shared with DIRINF
+CPDNMX RTS
+
+DIRIND STA COZERO
+ JSR STKUSA ;Stack user info at ARGA
+ LDXIM &C1
+ LDAIM HDRLEN
+ BNE DIRIN2
+
+;Call DIRMAN.EXAMINE to get last component of
+;file title (may be CR) and disc number and cycle
+;number of directory.
+;On entry, A is offset from MIDTX to put dir. name
+;Dir. name arg. is assumed at MIDRX
+
+DIRINF STA COZERO
+ JSR STKUSA ;Stack user info at ARGA
+ LDXIM &C0
+ LDAIM HDRLEN
+DIRIN2  ;Entry point from CPINFO
+ STX COZERO + 1 ;save parameter for DIRMAN
+ JSR SETFTP ;MOVE FILE TITLE PTR. TO STACK
+ INY
+ LDA COZERO ;Load offset
+ CLC
+ ADCIM MIDTX
+ STAIY NEWARG ;SET RESULT AREA FOR EXAMINE
+ LDAIM /(MIDTX )
+ ADCIM  0
+ INY
+ STAIY NEWARG
+ INY
+ LDAIM  4
+ STAIY NEWARG ;ARG. FOR EXAMINE => GET TITLE
+ LDAIM  7
+ JSR SETRTN
+
+ LDYIM ARGK
+ LDA COZERO + 1 ;passed parameter
+ STAIY NEWARG ;wild card flag
+
+ JMP DIRMAN ;GET INFO. and return
+
+
+SINDSC   ;SINDSC
+
+;Copy SIN/Disc no. from DANDS to
+;stack. Y already set as stack ptr.
+
+ LDXIM  0
+SDLP LDAAX DANDS
+ STAIY NEWARG
+ INY
+ INX
+ CPXIM  5
+ BNE SDLP
+ RTS
+
+
+IBLOCK   ;IBLOCK
+
+;Copy disc block information to stack, starting
+;at Y.
+
+;Info is:
+;1) Current disc block start (CURBLK)
+;2) No. of blocks to read/write (DIVPAR)
+;3) Address to read/write to/from (BBUF)
+
+ LDA CURBLK
+ STAIY NEWARG
+ INY
+ LDA CURBLK + 1
+ STAIY NEWARG
+
+ INY
+ LDA DIVPAR
+ STAIY NEWARG
+ INY
+ LDA DIVPAR + 1
+ STAIY NEWARG
+
+ INY
+ LDA IOBUF
+ STAIY NEWARG
+ INY
+ LDA IOBUF + 1
+ STAIY NEWARG
+
+ RTS
+
+
+
+
+SBUFPT
+
+ LDAIM  0
+
+;Set pointer on stack pointing to
+;text buffer.
+;Also set 0 in byte after receive buffer
+;Offset in A on entry to SETTXP
+
+SETTXP
+
+ INY
+ CLC
+ ADCIM TXTBUF
+ STAIY NEWARG
+ LDAIM /(TXTBUF )
+ INY
+ ADCIM  0
+ STAIY NEWARG
+ LDX BPTR
+ LDAIM  0
+ STAAX RXBUFT
+ RTS
+
+
+
+
+SETFTP
+
+;Sets file title pointer to stack
+;at Y.
+;On entry, A is offset of file title
+;in RX buffer.
+
+;This routine also puts 0 in the byte
+;after the receive buffer so that
+;analysis of the file title doesn't
+;get carried away.
+
+ INY
+ CLC
+ ADC BPTR ;Add file title offset to buffer offset
+ ADCIM RXBUF
+ STAIY NEWARG
+ LDAIM  0
+ ADCIM /(RXBUF )
+ INY
+ STAIY NEWARG
+ TXA
+ PHA ;Store X just in case
+ LDX BPTR
+ LDAIM  0
+ STAAX RXBUFT ;RX buffer terminater
+ PLA
+ TAX ;Restore X
+ RTS
+
+SAVNAM
+
+;Returns the last component of the pathname handed to save
+;in MIDTX [3:13]
+
+ LDX BPTR
+SAVNMA INX
+ LDAAX MIDRX + 11
+ CMPIM CR
+ BNE SAVNMA ;look for CR
+SAVNMB DEX
+ LDAAX MIDRX + 11
+ CMPIM "."
+ BEQ SAVNMC
+ CPX BPTR ;maybe just one component here
+ BNE SAVNMB
+ DEX
+SAVNMC INX
+ LDYIM  0
+SAVNMG LDAAX MIDRX + 11
+ CMPIM CR
+ BEQ SAVNMD
+ STAAY MIDTX + 3
+ INX
+ INY
+ BNE SAVNMG
+SAVNMD LDAIM &20
+SAVNME CPYIM  12
+ BCS SAVNMF
+ STAAY MIDTX + 3
+ INY
+ BNE SAVNME
+SAVNMF LDAIM &80
+ STAAY MIDTX + 3
+ RTS ;terminate with CR
+
+
+GETUSE   ;GETUSE
+
+;Call FINDMC using machine number
+;in net control block.
+
+;Then set CSD handle from RX block into
+;user table.
+
+
+ LDY QPTR
+ LDAAY CBSTID
+ STA MCNUMB
+ LDAAY CBSTID + 1
+ STA MCNUMB + 1
+ JSR FINDMC
+ BEQ GETUEX
+ JSR EXTERR
+ LDAIM &FF ;Indicate unsuccessful exit
+ RTS
+
+GETUEX LDX BPTR
+ LDAAX CPCSD ;GET CSD SENT FROM CLIENT
+ LDYIM UTHSLD
+ STAIY USTPTR ;SET CSD
+ LDAIM  0 ;Indicate successful exit
+ RTS
+
+
+
+SETUSE   ;SETUSE
+
+;Move user info. pointer in USTPTR
+;to stack.
+
+ INY
+ LDA USTPTR
+ STAIY NEWARG
+ LDA USTPTR + 1
+ INY
+ STAIY NEWARG
+ RTS
+
+
+STKUSE   ;STKUSE
+
+;GET USER INFO AND PUT ON STACK AT ARGB
+
+ JSR GETUSE
+ BNE STKUEX
+STKUSA LDYIM ARGA
+ JSR SETUSE ;NOTE SETUSE DOES INY FIRST, SO ARGA CORRECT
+ LDAIM  0
+
+STKUEX RTS
+
+
+STKHND   ;STKHND
+
+;PUT THREE HANDLES FROM RX BUFFER
+;ON STACK AT Y.
+
+ LDX BPTR
+ LDAAX CPUFD
+ STAIY NEWARG
+ INY
+ LDAAX CPCSD
+ STAIY NEWARG
+ INY
+ LDAAX CPLIB
+ STAIY NEWARG
+ RTS
+
+
+SETRTN   ;SETRTN
+
+ LDYIM ARGA
+ STAIY NEWARG
+ RTS
+
+
+
+SCOWPT   ;SCOWPT
+
+;Set pointer to COWORK on stack
+
+ INY
+ LDAIM COWORK
+ STAIY NEWARG
+ INY
+ LDAIM /(COWORK )
+ STAIY NEWARG
+ RTS
+
+
+
+OBJCLR
+
+;SIN/disc no. of object are on
+;stack (usually just after a call
+;of PRESERVE).
+
+;assumes that GETUSE result is valid ** 3/10/84 **
+
+;If SIN <> 0 ...
+
+;1) Clear object from store.
+;2) Delete object from map
+;3) Ensure map.
+
+ JSR SINZED ;Check SIN is zero (also used in RENAME)
+
+ BEQ OBJRTS ;If zero, exit
+
+ LDAIM  5 ;STRALL function
+ JSR SETRTN
+ JSR STRMAN ;Flush from store
+ BEQ OBJJES ;skip if ok
+ LDYIM ARGA
+ STAIY NEWARG ;put it on the stack
+ BNE OBJRTS ;**** 17/3/83 ****
+
+OBJJES LDYIM ARGF
+ JSR SETUSE ;pass pointer to user info ** 3/10/84 **
+
+ LDAIM MAPFS ;Map free store
+ JSR SETRTN
+ JSR MAPMAN ;Delete from map
+ BNE OBJABT ;No good => abort
+
+ LDAIM MAPENS ;Map ensure fn.
+ LDYIM ARGA
+ STAIY NEWARG
+ JSR MAPMAN ;Ensure map
+ BEQ OBJRTS ;OK => exit
+
+OBJABT JSR INTERR ;Not ok => stop
+
+OBJRTS RTS
+
+
+SINZED LDYIM ARGD
+ LDAIY NEWARG
+ INY
+ ORAIY NEWARG
+ INY
+ ORAIY NEWARG
+ RTS
+
+
+STKLST
+
+;Gets entry point, no. of entries and a pointer
+;to BIGBFR +1 onto stack. Used by DISCS and USERS
+
+ TYA
+ TAX ;pointer into MIDRX
+ LDYIM ARGB
+ LDAAX MIDRX
+ STAIY NEWARG ;Start point in list
+ INY
+ LDAAX MIDRX + 1
+ STAIY NEWARG ;Number of entries
+ INY
+ LDA BBUF
+ CLC
+ ADCIM TXHDR + 1 ;Result area
+ STAIY NEWARG
+ INY
+ LDA BBUF + 1
+ ADCIM  0
+ STAIY NEWARG
+ RTS
+
+
+
+LSTRPY
+
+;Given no. of entries found and ptr. to
+;end of result area on stack, sends off the
+;result of DISC/USERS in big buffer.
+;On entry A = continue code.
+
+
+ STA TEMPA
+ LDYIM ARGB
+ LDAIY NEWARG
+ PHA  ;Number of entries found
+ LDA BBUF
+ STA GENPTR
+ LDA BBUF + 1
+ STA GENPTR + 1
+ LDYIM  0
+ LDA TEMPA ;Continue code
+ STAIY GENPTR
+ LDAIM  0 ;Return code
+ INY
+ STAIY GENPTR
+ PLA
+ INY
+ STAIY GENPTR ;Number of entries found
+
+;Set control block for reply
+
+ LDA RPLYPT
+ LDX QPTR
+ STAAX CBPORT
+ LDA BBUF
+ STAAX CBBUF ;Ptr. to message
+ LDA BBUF + 1
+ STAAX CBBUF + 1
+ LDYIM ARGC
+ LDAIY NEWARG ;End of result buffer
+ STAAX CBBUFE
+ INY
+ LDAIY NEWARG
+ STAAX CBBUFE + 1
+ LDY QPTR ;Arg to SEND
+ JMP SEND ;Send reply and exit
+
+
+
+LDRETR
+
+ LDAIM LODFTO
+
+CPRETR
+
+;Set stack and call DIRMAN retrieve
+;to put details into COWORK buffer.
+;On entry A = offset in RXCB of file name
+
+ PHA
+ LDAIM DRRTR ;Dirman retreive
+ JSR SETRTN
+ JSR SETUSE ;PLACE ADDR OF USERINFO ONTO NEWARG STACK
+ PLA  ;Pull f.t. offset
+ JSR SETFTP ;Set file title pointer
+ LDAIM &C0 ;allow wild cards in LOAD
+CPRET1 PHA ;save flag over call
+ JSR SCOWPT
+ PLA
+
+ LDYIM ARGH
+ STAIY NEWARG ;wild card flag
+
+ JMP DIRMAN ;Get info. to COWORK and return
+
+
+
+ [ 1=0
+RNAMDQ TAY
+ LDAIM &C0 ;wild card flag
+ PHA
+ TYA
+ BNE RNAMDC
+
+RNAMDM
+
+;Call DIRMAN with function code in A, file title offset
+;from TXTBUF in X. Used from RENAME.
+
+ TAY
+ LDAIM  0
+ PHA
+ TYA
+RNAMDC JSR SETRTN
+ JSR SETUSE
+ TXA ;Get offset of file name in TXTBUF
+ JSR SETTXP
+ PLA
+ JMP CPRET1 ;Set pointer to COWORK, and call DIRMAN
+
+
+
+CHEKRN
+
+;Check access/type byte for RENAME
+;Must be an unlocked file with OWNER access
+
+ LDXIM  3
+ LDYIM ARGB
+ LDAIY NEWARG
+ EORIM OWNER ;Flip the OWNER bit
+ ASLA
+CHEKRL ASLA
+ BCS CHEKRZ
+ DEX
+ BNE CHEKRL
+
+ TXA ;Zero RC
+ RTS
+
+CHEKRZ LDAAX CHEKTB - 1
+ RTS
+
+CHEKTB = DRERRG ;Is locked
+ = LODERA ;Is a directory
+ = DRERRE ;Insufficient access
+ ]
+
+
+;COMMAND LINE UTILS
+
+
+BUFTXT
+
+;Get string (possibly quoted) from
+;CLI string (at MIDRX) and transfer
+;to TXTBUF offset by X (normally zero)
+;NOTE - ACKS and NACKS ignored here !!
+
+ LDXIM  0
+BTXTA LDAIM  0
+ STA QUOTED ;Quoted flag
+
+ JSR SPACES
+ CMPIM """"
+ BNE GCHON
+ DEC QUOTED ;Quoted flag on
+ DEX
+
+GCHLP INX
+GCHLPA INY
+GCHON LDAAY MIDRX
+GCHFIX STAAX TXTBUF
+
+ CMPIM ACK
+ BEQ GCHLPA ;Inc. string ptr., but not buffer
+ CMPIM NACK
+ BEQ GCHLPA
+
+ CMPIM CR
+ BEQ GCHEND
+ CMPIM SPACE
+ BNE GCHONA
+ BIT QUOTED
+ BMI GCHLP ;Spaces OK in quoted string
+
+GCFIXA LDAIM CR ;Finish with CR as terminator in destn.
+ BNE GCHFIX
+
+GCHONA CMPIM """"
+ BNE GCHLP
+ INY  ;Step C.line ptr. past final delimiter
+ INC QUOTED ;Switch off quoted flag
+ BEQ GCFIXA ;Exit, with CR terminator
+
+GCHEND LDA QUOTED
+ BNE BUFERR ;Error in quoted string
+ RTS  ;Otherwise exit, Z set
+
+BUFERR LDAIM NAMERR
+ PHP
+ JSR EXTERR ;Send error message
+ PLP
+ RTS  ;Give Z unset exit
+
+
+
+RDNUM  ;RDNUM
+
+;Read hex number (up to 4 bytes)
+;into 4-byte p.0 area at X. NOTE
+;uses 1 extra byte at X.
+
+ LDAIM  0
+ STAZX  0
+ STAZX  1
+ STAZX  2
+ STAZX  3
+ STAZX  4
+ JSR SPACES
+RDHXLP LDAAY MIDRX
+ CMPIM "0"
+ BCC RDHXEX
+ CMPIM &3A
+ BCC RDHXON
+ SBCIM  7
+ BCC RDHXEX
+ CMPIM &40
+ BCS RDHXEX
+
+RDHXON ASLA
+ ASLA
+ ASLA
+ ASLA
+ STYZX  4
+ LDYIM  4
+RDHXIN ASLA
+ ROLZX  0
+ ROLZX  1
+ ROLZX  2
+ ROLZX  3
+ DEY
+ BNE RDHXIN
+ LDYZX  4
+ INY
+ BNE RDHXLP
+
+RDHXEX LDAZX  4
+ RTS
+
+
+SPACER DEY
+SPACLP INY
+SPACES LDAAY MIDRX
+ CMPIM SPACE
+ BEQ SPACLP
+ RTS
+
+
+RDTITL
+
+;Move file title into TXTBUF and
+;check to end of line for syntax.
+
+ JSR BUFTXT
+ BNE RDTITX
+ JSR COMEND
+RDTITX RTS
+
+
+COMEND JSR SPACES
+ CMPIM CR
+ BEQ COERTS
+ LDAIM SYNERR
+ JSR EXTERR
+ LDAIM SYNERR ;Give non-zero exit
+COERTS RTS
+
+;** E R R O R  T A B L E **
+
+ERRTAB = URERRA,"Who are you?",CR
+ = WOTERR
+ = "Bad Command",CR
+ = NAMERR
+ = "Bad string",CR
+ = DRERRA
+ = "Bad file name",CR
+ = DRERRB
+ = "Broken dir",CR
+ = DRERRC
+ = "Not found",CR
+ = DRERRD
+ = "Not a directory",CR
+ = DRERRE
+ = "Insufficient access",CR
+ = DRERRG
+ = "Entry locked",CR
+ = ATERRB
+ = "User not known",CR
+ = ATERRC
+ = "Wrong password",CR
+ = ATERRE
+ = "Bad password",CR
+ = MPERRB
+ = "Disc full",CR
+ = MPERRA
+ = "Disc changed",CR
+ = SAERRA
+ = "Bad attribute",CR
+ = ATERRA
+ = "PW file not found",CR
+ = &54
+ = "INSERT A FILE SERVER DISC",CR
+ = RDERRB
+ = "Channel",CR
+ = RDERRJ
+ = "EOF",CR
+ = RDERRL
+ = "Outside file",CR
+ = RDERRH
+ = "Already open at station ",CR
+ = RDERRH
+ = "File read only",CR
+ = DCERRE
+ = "Disc read only",CR
+ = DCERRF
+ = "Disc fault",CR
+ = MPERRL
+ = "Map fault",CR
+ = RDERRC
+ = "Too many open files",CR
+ = URERRB
+ = "Too many users",CR
+ = LODERA
+ = "Is a directory",CR
+ = &BA
+ = "Insufficient privilege",CR ;** 13/4/83 **
+ = DRERRJ
+ = "Dir. not empty",CR
+ = DRERRM
+ = "Dir. full",CR
+ = ATERRF
+ = "Already a user",CR
+ = RNAMQQ
+ = "Bad Rename",CR
+ = DRERRK
+ = "Types don't match",CR
+ = URERRE
+ = "Not logged on",CR
+ = ATERRG
+ = "Bad user name",CR
+ = RDERRO ;** 16/11/84
+ = "Write only",CR
+ = MPERRN
+ = "Insufficient space",CR
+ =  0 ;Table terminator
+
+FNSH
+LEFT * FRESTR - . ;get free store
+ [ LEFT :SHR:  8 =0;must be less than a page
+ |
+ ! 0,"FRESTR incorrect"
+ ]
+
+;** T H E  E N D ***
+ [ FS=0
+ <  0
+ >  3
+ ]
+ END
+
