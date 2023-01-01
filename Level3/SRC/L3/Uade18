@@ -30,8 +30,10 @@ RENAME
 
  STY COTEMP
  JSR GETUSE
- BNE RNAMX2
- LDY COTEMP ;pointer into MIDRX
+ BEQ RENJX1
+ JMP RNAMEX ;Exit via extra jump
+
+RENJX1 LDY COTEMP ;pointer into MIDRX
  JSR BUFTXT ;Buffer name A
  BNE RNAMX2 ;Exit via extra jump
  INX
@@ -146,8 +148,14 @@ RNAMER
  ]
 
 RNAML6
+ [ 1=1
+ LDAAX TXTBUF ;check for subdirectory here
+ CMPIM SEPART ;** 27/3/85 **
+ BEQ RNAMLE
+ |
  CMPAX TXTBUF
  BNE RNAMLE ;names identical
+ ]
 
 RNAML4 JSR STKUSE ;Set up PRESERVE call for A details, named B
  LDA COTEMP
@@ -378,10 +386,15 @@ FIND ROUT
 
  JSR GETUSE ;Set mc no. and call FINDMC
  BEQ FINDA ;OK, continue
+ JMP FNDRTS
 
 FINDC
+ [ 1=0
  JSR EXOPEN ;Not OK, send error code
  JMP FNDRTS ;Return
+ |
+ JMP ERROR
+ ]
 
 ;USTPTR now points to user info.
 ;Check if need to create a new file
@@ -407,7 +420,15 @@ FINDD JSR FIRETR ;Retrieve details of existing file
 
 FINDB LDYIM ARGB
  LDAIY NEWARG ;Get access allowed and type
- LDYIM ARGE
+ TAX
+ ANDIM RDWRAC+TYPE
+ BNE #10 ;File, no read or write access
+
+ LDAIM DRERRE
+ BNE FINDC ;insufficient access
+
+10 LDYIM ARGE
+ TXA
  STAIY NEWARG ;Set up for RNDMAN call
  PHA ;save access byte
 
@@ -453,6 +474,16 @@ FINDF1 ORA COTEMP
  LDY BPTR
  LDAAY MIDRX +1 ;updating file ?
  BNE FNDNJC
+
+ LDA DATE ; NO CHANGE TO DIR IF DATE IS SAME *** LH 15/12/85 ***
+ CMP COTEMP+INFDTE
+ BNE LHDCHG
+ LDA DATE+1
+ CMP COTEMP+INFDTE+1
+ BEQ FNDNJC
+
+LHDCHG
+
  LDYIM ARGA
  LDAIM 4
  STAIY NEWARG ;DIRMAN.SET ATTRIBUTES

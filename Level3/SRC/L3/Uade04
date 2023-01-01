@@ -259,6 +259,7 @@ CHKDTE LDA DATE
  BEQ CHKDNG
  CMPIM 13
  BCS CHKDNG
+ [ 1=0 ; A FEW LINE WHICH DO NOTHING REMOVED LH 17/1/86**
  LDA DATE +1
  LSRA
  LSRA
@@ -266,6 +267,7 @@ CHKDTE LDA DATE
  LSRA
  CMPIM 29
  BCS CHKDNG
+ ]
  LDA DATE
  CMPIM 29
  BCC DTOK
@@ -999,8 +1001,8 @@ SETTM1 LDA MUNTHS
  LDXIM 0
  JSR #95 ;set month                                          
 
- LDA MUNTHS
- JSR SETMFX
+ LDA MUNTHS    ; *** LH 15/1/86 ***
+ JSR SETMFX    ; Fix year and month to form for register
  LDXIM 3
  JSR #95 ; Set oldmonth to month and flag
 
@@ -1135,6 +1137,9 @@ RDDONG
  JSR #00
  JSR #70
  JSR SETYR
+ ; JSR REDFIX  ; Fix year and month if neccessary *** LH ***
+             ; *** 15/1/86 ***
+ ; RTS
                           
 
 REDFIX  ; FIX year changes    

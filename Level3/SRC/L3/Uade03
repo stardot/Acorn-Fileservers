@@ -18,18 +18,30 @@ ENPT
 COPYRIGHT
  = 0,"(C) 1984 Acorn",CR,0
 
- & ENPT
- & 0
+; & ENPT
+; & 0
 
 START
 
  JSR VSTRIN
  =  22, 7 ;select mode 7
  = CR,"Acorn File Server Level "
- = "3 Version 0.",VERLA,VERLB,CR
- = "           Pre-release "
-VERSN = "IV.05",CR ;software protection 
+VERSN = "3 Version 1.",VERLA,VERLB,CR
+ = 21,"Version string",6 ;software protection 
+ = "   File server station "
 
+ NOP               ;Print station number LH 21/10/85
+ LDAIM &08
+ STA &0100
+ LDAIM &13
+ LDXIM &00
+ LDYIM &01
+ JSR OSWORD
+ LDA &0101
+ JSR MKDEC
+ JSR PRTMC2
+
+ JSR VSTRIN
  = 28, 0, 21, 39, 4 ;define a window
  NOP
  LDXIM WCMD
@@ -38,6 +50,7 @@ VERSN = "IV.05",CR ;software protection
  LDXIM WDCMD
  LDYIM /WDCMD
  JSR OSCLI
+ 
 
  JMP STRTFS ; .. here we go ..
 

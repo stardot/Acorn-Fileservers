@@ -53,11 +53,11 @@ WINCH * &00 ;IF WINCHESTER DISCS
 SYS * &FF ;flags to indicate which type of FS
 ZTIME * &FF
 FS * &FF
-DONGLE * 1 ;Real Time Clock present(=0) absent(=1)
+DONGLE * 0 ;Real Time Clock present(=0) absent(=1)
 
 
-VERLA * "9"
-VERLB * "0"
+VERLA * "0"
+VERLB * "1"
 DEBUG *  0 ;Make this +ve for debug letters
 MASK * &FF ;protection state
 

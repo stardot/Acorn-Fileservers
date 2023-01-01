@@ -627,21 +627,27 @@ USURLE LDYIM UTPRIV
 ;First loop round finding entries in use until
 ;ENTRY = TEMPA = START ENTRY
 
-USRLHA LDAIY USTPTR
- BPL USURLB
+ LDAIY USTPTR ; ** LABLE REMOVE 14/1/86 **
+ BPL USURLB ;Not in use, don't count
 
 ;** skip privileged users (27/9/84)
 ;** Report PRIV users only to a PRIV request **
-
+;*** LH 14/1/86 ***
  ANDIM SYSTPV        ; They are loged on so should appear LH 21/10/85
- BNE USURLB
+ BEQ USRLHA          ; Not priv so exist
+ LDYIM ARGF          ; PRIV entry so test priv of caller
+ LDAIY ARGPTR
+
+ BEQ USURLB ; Skip to next entry
+           
+USRLHA
  INC TEMPB ;Inc. current entry
  LDA TEMPB
  CMP TEMPA ;Current >= start entry ?
  BCS USURLC ;Yes => start copying to result
 
 USURLB JSR INCUST ;Jump to next entry
- BNE USRLHA ;If not off end of table, do again
+ BNE USURLA ;If not off end of table, do again
  JMP USURLX ;Otherwise, finish
 
 USURLC TXA
@@ -670,7 +676,7 @@ USURLD LDAIY USTPTR
  [ 1=1
  LDAIM CR ;If 10 chars long, terminate with zero
  STAIX GENPTR
- ; JSR INCGPT ;** 23/4/85 **
+ JSR INCGPT ;** 23/4/85 **
  ]
 
 USURLF LDYIM UTPRIV ;Get priviledge byte

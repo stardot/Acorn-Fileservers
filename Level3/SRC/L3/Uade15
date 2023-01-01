@@ -197,7 +197,7 @@ DOCMND   ;DOCMND
  JSR MONITR ;*** Do monitor **
  PLA
 
- CMPIM FCMAX
+ CMPIM FCMAX + 1 ;Is < biggest fn. code +1 ?
  BCC FCOK ;Yes => ok
 
  LDAIM COERRA
@@ -278,6 +278,7 @@ FNTAB   ;FNTAB
  & SAVE ; 29 - Do a 'create', like 'save' but no data
  & RDFREE ;30 - read callers free space
  & WRFREE ;31 - write users free space
+ & CPWHO ;32 - return client user name
 
 ;COMMAND LINE DECODER ....
 

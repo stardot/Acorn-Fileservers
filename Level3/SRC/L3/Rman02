@@ -469,7 +469,6 @@ RDJHWA JSR RDCHSZ ;call changesize
  BNE RDSTAZ
 
  ROR TEMPB ;restore the carry
- BCS RDJHW9 ; exit all ok
 
  [ 1=0
  BCS RDJHW9 ; exit all ok
