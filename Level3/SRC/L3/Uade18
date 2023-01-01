@@ -1,0 +1,878 @@
+ OPT UADE18 ;FILE > Uade18
+ TTL File server file UADE18
+
+;Random access and RENAME & User Info
+
+RAORG
+
+;Label to set ORG for printing purposes
+;(i.e. to fool second pass into ORGing
+;at correct address).
+
+ ORG RAORG
+
+
+
+;***************
+;* R E N A M E *
+;***************
+
+
+RENAME
+
+;Rename file <A> as <B>
+;
+;1) Buffer both file names, call DIRMAN.CHECKDISCNOS
+;2) Retrieve A. Check owner access, is a file, is unlocked
+;3) Preserve name B with details of A
+;4) If old SINofB = SINofA, renaming same file -> return
+;5) Else, clear oldB from map, and delete A from dir (not map!)
+
+ STY COTEMP
+ JSR GETUSE
+ BNE RNAMX2
+ LDY COTEMP ;pointer into MIDRX
+ JSR BUFTXT ;Buffer name A
+ BNE RNAMX2 ;Exit via extra jump
+ INX
+ STX COTEMP ;Store offset of B in TXTBUF
+ JSR BTXTA ;Buffer name B
+ BNE RNAMX2 ;Exit via extra jump
+ JSR COMEND ;Check to end of command line
+ BNE RNAMX2 ;Exit via extra jump
+
+;** 24/9/84 **
+
+;Substantial rewrite to allow renaming of directories
+;The actual mechanics are identical to renaming files
+;but lots of checking for loops in directories needs to be
+;done, which means that full pathname expansion is called for
+
+ LDA BBUF
+ STA PTR
+ LDA BBUF+1
+ STA PTR+1
+
+ LDAIM 0 ;full wild card lookup
+ STA REXIST
+ JSR RNAMLK ;do the checking for existence etc.
+ BNE RNAMX2 ;fail
+
+ STX RTYPE ;type of object that we've found
+ CLC
+ LDA PTR
+ STA PTR1
+ ADCIM INFNXT
+ STA PTR
+
+ LDA PTR+1
+ STA PTR1+1
+ ADCIM /INFNXT
+ STA PTR+1 ;new result area
+
+;PTR =lastname and info <B>
+;PTR1=lastname and info <A>
+
+ LDA COTEMP ;offset of name <B>
+ JSR RNAMLK ;similar checking as for <A>
+ BEQ RNAML1 ;all succeeded [but may not be ok !]
+
+ LDXIM 0 ;no object returned so no type either
+ CMPIM DRERRC ;'not found' in final part of name
+RNAMX2 BNE RNAMER ;failed for some serious reason
+ ROR REXIST ;object <B> done NOT exist (=>&80)
+ BMI RNAMJA ;if so then skip disc number check
+
+;now look for rename across discs
+
+RNAML1 LDYIM INFDIS
+ LDAIY PTR
+ CMPIY PTR1
+ BNE RNAMLE ;failed here
+ INY
+ LDAIY PTR
+ CMPIY PTR1
+ BNE RNAMLE ;failed here too
+
+RNAMJA LDA RTYPE ;look for file/dir
+ ANDIM TYPDIR
+ BEQ RNAML4 ;file so ok
+
+;now look for loops in directories
+
+ LDYIM 0 ;from the beginning
+ STY LAST
+ LDX COTEMP ;starts with "$" ?
+ LDAAY TXTBUF
+ CMPIM ROOT
+ BNE RNAMLA
+ INC LAST
+RNAMLA LDAAX TXTBUF
+ CMPIM ROOT
+ BNE RNAMLB
+ DEC LAST
+RNAMLB ;X=0 or fail here
+ LDA LAST ;test for mismatch
+ BNE RNAMLE ;bad rename
+
+RNAML0 LDAAY TXTBUF
+ JSR ISCHAR
+ BCS RNAMCS
+ ANDIM &DF ;force upper case
+RNAMCS CMPIM TERMIN
+ BEQ RNAML6 ;bad, LEFT$<B>=$<A> unless $<A>=$<B>
+ STA NAME
+ LDAAX TXTBUF ;mismatch in names is essential
+ JSR ISCHAR ;force case on both chars
+ BCS RNAMCT
+ ANDIM &DF
+RNAMCT CMP NAME ;match against other name
+ BNE RNAMLD
+ INX
+ INY
+ BNE RNAML0
+
+RNAMLD BIT REXIST ;different names so <B> must NOT exist
+ BMI RNAML4
+
+RNAMLE LDAIM RNAMQQ ;bad rename error string
+
+RNAMER
+ [ 1=0
+ JSR EXTERR ;some other error number
+ JMP RNAMEX
+ |
+ JMP ERROR
+ ]
+
+RNAML6
+ CMPAX TXTBUF
+ BNE RNAMLE ;names identical
+
+RNAML4 JSR STKUSE ;Set up PRESERVE call for A details, named B
+ LDA COTEMP
+ JSR SETTXP ;put name to stack
+
+ INY
+ STY NAME
+ LDAIM INFLOA
+ STA ONAME ;counters
+ LDXIM 17
+
+RNAML5 LDY ONAME
+ LDAIY PTR1
+ LDY NAME
+ STAIY NEWARG
+ INC ONAME
+ INC NAME
+ DEX
+ BNE RNAML5 
+
+ LDAIM 12
+ JSR SETRTN ;Do DIRMAN.PRESERVE (without DELCHK)
+
+ LDYIM ARGT
+ LDAIM &80 ;enable wildcards
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN
+ BNE RNAMER
+
+ BIT REXIST ;did <B> exist
+ BMI RNAML2 ; .. no ..
+
+ LDXIM 3
+ LDYIM INFSIN+2
+RNAML7 LDAIY PTR
+ CMPIY PTR1
+ BNE RNAML8
+ DEY
+ DEX
+ BNE RNAML7
+
+RNAML8 TXA
+ BEQ RNAML3 ;if identical then NOP
+
+RNAML9 JSR OBJCLR ;Clear old B from map (if SIN <> zero)
+ BNE RNAMER ;Error exit
+
+;Then finally delete name A from directory
+
+RNAML2 JSR STKUSE
+ JSR SBUFPT ;Set pointer to TXTBUF
+ LDAIM 11 ;** 24/9/84 **
+ JSR SETRTN
+
+ LDYIM ARGG
+ LDAIM &C0
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN ;Delete A
+RNAML3 JSR RCODE ;Return success/failure and exit
+
+RNAMEX JMP COMRTS
+
+
+RNAMLK ;A=offset in TXTBUF of pathname for object
+ ;PTR=results area
+
+;retrieves object in TXTBUF, expanding pathname into !PTR
+;checks object existence, pathname completeness,
+;object owned, unlocked, not open
+
+ PHA
+ JSR STKUSE ;prepare for retrieve call
+ PLA
+ JSR SETTXP ;point to the name
+ 
+ LDYIM ARGF
+ LDA PTR
+ STAIY NEWARG
+ INY
+ LDA PTR+1
+ STAIY NEWARG ;pointer to results area
+ INY
+ LDAIM 0 ;no wildcards
+ STAIY NEWARG
+
+ LDAIM 2
+ JSR SETRTN
+ JSR DIRMAN ;call retrieve
+ BNE RNAMF ;DIRMAN call failed
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ TAY
+
+ ANDIM OWNER
+ BNE RNAMJ5
+ LDAIM DRERRE ;'insufficient priv'
+ BNE RNAMF
+
+RNAMJ5 TYA
+ ANDIM LOCKED
+ BEQ RNAMJ6
+ LDAIM DRERRG ;'entry locked'
+ BNE RNAMF
+
+RNAMJ6 STY LAST ;preserve Type & access
+
+;now check that it isn't open
+
+ LDAIM ARGB
+ STA NAME
+ LDYIM INFDIS
+ STY ONAME
+ LDXIM 2
+ JSR RNAMJ7 ;copy disc no.
+
+ LDAIM INFSIN
+ STA ONAME
+ LDXIM 3
+ JSR RNAMJ7 ;copy SIN
+
+ LDAIM 2
+ JSR SETRTN
+ JSR RNDMAN ;ask for info
+ PHA
+ LDX LAST
+ PLA
+ BNE RNAMJ8 ;RC=0 if open
+
+ LDAIM RDERRH ;'already open'
+ BNE RNAMF
+
+RNAMJ8 LDAIM 0 
+
+RNAMF RTS ;*** the end ** 
+
+ 
+RNAMJ7 LDY ONAME
+ LDAIY PTR
+ LDY NAME
+ STAIY NEWARG
+ INC NAME
+ INC ONAME
+ DEX
+ BNE RNAMJ7
+ RTS
+
+
+;**************
+;* USER INFO  *
+;**************
+
+
+CPUINF
+
+ JSR STKUSE
+ BNE USRIXX ;Who are you
+
+ LDAIM HDRLEN ;Offset of user name
+ JSR SETFTP ;Set ptr. to user name
+
+ LDAIM 6 ;USRMAN.USERINFO
+ JSR SETRTN
+
+ JSR USRMAN
+ BNE USRIYY
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ STA MIDTX
+ INY
+ LDAIY NEWARG
+ STA MIDTX + 1
+ INY
+ LDAIY NEWARG
+ STA MIDTX + 2
+
+ LDAIM TXHDR + 3 ;Message length
+ JSR REPLYC ;Return message
+
+USRIXX JMP COMRTS
+
+USRIYY JSR RCODE ;Send error
+ JMP USRIXX
+
+
+
+
+;*************
+;* C L O S E *
+;*************
+
+CPSHUT JSR STKUSE
+ BNE CPSEXT
+ LDX BPTR
+ LDAAX MIDRX ;Get old handle
+ BEQ CPSHTA ;Handle=0 => close all files for machine
+
+ INY
+ STAIY NEWARG
+ LDAIM 3 ;"Close handle"
+ BNE CPSHTB ;Always jumps
+
+CPSHTA LDAIM &D ;"Close all files"
+
+CPSHTB JSR SETRTN
+ JSR RNDMAN
+ JSR RCODE
+
+CPSEXT JMP COMRTS
+
+;********
+;* FIND *
+;********
+
+;Open a file for reading or update,
+;or open a directory
+
+;Entry: BPTR is offset of buffer in RXBUF
+;QPTR is offset of control block in RXCBV
+
+FIND ROUT
+; LDAIM READAC ;Minimum access
+ LDAIM 0 ;** 15/11/84 **
+ STA COTEMP ;COTEMP used to build access byte
+
+ JSR GETUSE ;Set mc no. and call FINDMC
+ BEQ FINDA ;OK, continue
+
+FINDC
+ JSR EXOPEN ;Not OK, send error code
+ JMP FNDRTS ;Return
+
+;USTPTR now points to user info.
+;Check if need to create a new file
+;or if existing one will do. Then either create or retrieve
+;new or existing file.
+
+FINDA LDX BPTR
+ LDAAX MIDRX + 1
+ BNE FINDD ;Not opening for update
+ LDAAX MIDRX
+ BNE FINDD ;File must exist => don't create
+
+ JSR FICRFL ;Otherwise, create file and forge retrieve info.
+ BNE FINDC ;Error
+
+ LDA COTEMP
+ ORAIM FILEJC ;Set "just created" flag in mode
+ STA COTEMP
+ BNE FINDB ;Skip round retrieve since we have all info. already
+
+FINDD JSR FIRETR ;Retrieve details of existing file
+ BNE FINDC
+
+FINDB LDYIM ARGB
+ LDAIY NEWARG ;Get access allowed and type
+ LDYIM ARGE
+ STAIY NEWARG ;Set up for RNDMAN call
+ PHA ;save access byte
+
+ LDYIM ARGA
+ LDAIM 1 ;RNDMAN.OPEN
+ STAIY NEWARG
+
+ JSR SETUSR ;Copy USTPTR onto stack
+
+;Mode so far is in COTEMP - may need write
+;access bit setting.
+
+ PLA ;restore access byte
+ LDX BPTR
+ LDYAX MIDRX + 1 ;Get read flag from  client
+ BNE FINDF ;Jump if set
+
+ ANDIM 3 ;supply just the public access bits
+ JMP FINDF1 ;fall thru' IS ok here
+
+; ORAIM RDWRAC ;Set Read/Write access
+
+FINDF LDAIM READAC
+FINDF1 ORA COTEMP
+ LDYIM ARGD
+ STAIY NEWARG ;Put mode on stack
+
+ INY  ;Y := ARGE
+ JSR SCOWPT ;Put COWORK ptr on stack
+
+ JSR RNDMAN ;*** Call RNDMAN.OPEN **
+ BNE FINDG ;Open failed
+
+;Open worked - return handle
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ STA MIDTX ;Store handle in TX buffer
+
+ LDA COTEMP
+ ANDIM FILEJC ;DATE ALREADY SET IF JUST CREATED
+ BNE FNDNJC
+ LDY BPTR
+ LDAAY MIDRX +1 ;updating file ?
+ BNE FNDNJC
+ LDYIM ARGA
+ LDAIM 4
+ STAIY NEWARG ;DIRMAN.SET ATTRIBUTES
+ JSR SETUSE ;USER INFO
+ LDAIM FNDFTO ;POINTER TI FILE TITLE
+ JSR SETFTP ;FILE TITLE POINTER TO STACK
+ INY
+ LDAIM &C0 ;** 19/11/84 ** only updates one entry
+ STAIY NEWARG ;SET WILD CARD FLAG
+ INY
+ LDAIM 5 ;SET DATE FUNCTION
+ STAIY NEWARG
+ INY
+ LDA DATE
+ STAIY NEWARG ;PUT IN CURRENT DATE
+ INY
+ LDA DATE +1
+ STAIY NEWARG
+ JSR DIRMAN ;SET TODAYS DATE ON OBJECT
+ BNE FINDG ;SHOULDN'T FAIL!!!
+
+FNDNJC LDAIM TXHDR + 1 ;Message length
+ JSR REPLYC ;Send handle back
+
+FNDRTS JMP COMRTS ;Return
+
+FINDG
+ [ 1=1
+ JSR EXOPEN ;Send error code
+ JMP FNDRTS ;exit
+ |
+ JMP ERROR
+ ]
+
+
+
+;*** FIRETR ***
+
+;Called from FIND to retrieve file details.
+;Calls DIRMAN.RETRIEVE
+
+;Entry: USTPTR points to USERTB entry
+;File title stil in RX buffer
+
+;Exit:  A: return code
+;COWORK buffer: file details
+;ARGB on NEWARG: max access allowed
+
+FIRETR LDYIM ARGA ;Set up stack for DIRMAN call
+ LDAIM DRRTR ;DIRMAN.RETRIEVE
+ STAIY NEWARG
+
+ JSR SETUSE ;Put user info on NEWARG stack
+
+ LDAIM FNDFTO ;File title offset
+ JSR SETFTP ;Set file title pointer
+
+ JSR SCOWPT
+
+ LDYIM ARGH
+ LDAIM &C0
+ STAIY NEWARG ;wild card flag
+
+ JMP DIRMAN ;*** Call DIRMAN.RETRIEVE and return **
+
+
+
+;*** FICRFL ***
+
+;Called to create new file in FIND.
+;File is created with standard size of FIFLSZ bytes.
+
+;Entry: USTPTR points to user info
+;File title in request buffer
+
+;Exit:  A = return code
+;COWORK buffer: file details as if from
+;DIRMAN.RETRIEVE
+
+FICRFL LDAIM 10
+ JSR SETRTN ;=> get disc number for this file
+ JSR SETUSE
+ LDAIM FNDFTO
+ JSR SETFTP ;Set pointer to file title
+
+ LDYIM ARGK
+ LDAIM &80
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN ;DIRMAN.FILETITLETODISCNUMBER
+ BNE FICRFM
+
+;Correct disc number now on stack
+
+ LDYIM ARGD ;Set file size to manifest FIFLSZ
+ LDAIM FIFLSZ
+ STAIY NEWARG ;LS byte
+ INY
+ LDAIM /(FIFLSZ )
+ STAIY NEWARG ;CS byte
+ INY
+ LDAIM 0 ;MS byte zero
+ STAIY NEWARG
+
+ JSR SETUSE ;pass userinfo @ ARGG,H ** 3/10/84 **
+
+ LDAIM MAPCS ;MAPMAN.CREATESPACE
+ JSR SETRTN
+
+ JSR MAPMAN ;*** MAPMAN.CREATSPACE **
+ BEQ FICRFK
+FICRFM RTS  ;Exit if failed
+
+;Disc number and SIN on stack.
+;Save them in COWORK (=DETRAM) buffer in
+;DIRMAN.RETRIEVE format.
+
+FICRFK LDYIM ARGB
+ LDAIY NEWARG ;Disc no. (LS)
+ STA DETDIS
+ INY
+ LDAIY NEWARG ;Disc no. (MS)
+ STA DETDIS + 1
+
+ LDYIM ARGD
+ LDAIY NEWARG ;SIN (LS)
+ STA DETSIN
+ INY
+ LDAIY NEWARG ;SIN (CS)
+ STA DETSIN + 1
+ INY
+ LDAIY NEWARG ;SIN (MS)
+ STA DETSIN + 2
+
+;zero the new space
+
+ LDYIM ARGG
+ LDAIM 0 ;old size
+ STAIY NEWARG
+ INY
+ STAIY NEWARG
+ INY
+ STAIY NEWARG
+
+ LDAIM 13
+ JSR SETRTN
+ JSR MAPMAN
+ BNE FICRFM ;exit if error
+
+;Preserve the newly created file
+
+ LDAIM DRPRS ;DIRMAN.PRESERVE
+ LDYIM ARGA
+ STAIY NEWARG
+
+ JSR SETUSE ;Set user info on NEWARG stack
+
+ LDAIM FNDFTO ;Offset of file title
+ JSR SETFTP ;Set pointer to title
+
+ LDAIM &FF ;Clear load & exec addresses to $FF
+
+FICRFA INY
+ STAIY NEWARG
+ CPYIM ARGM ;ARGM is end of exec address
+ BNE FICRFA ;Loop
+
+ LDAIM ACCDEF ;Default access
+ ORAIM TYPFIL ;Type = file
+ INY
+ STAIY NEWARG ;Set type & access
+
+ INY  ;Set creation date
+ LDA DATE
+ STAIY NEWARG
+ INY
+ LDA DATE + 1
+ STAIY NEWARG
+
+;Copy SIN from COWORK (=DETRAM) to NEWARG stack
+
+ LDA DETSIN ;SIN (LS)
+ INY
+ STAIY NEWARG
+ LDA DETSIN + 1 ;SIN (CS)
+ INY
+ STAIY NEWARG
+ LDA DETSIN + 2 ;SIN (MS)
+ INY
+ STAIY NEWARG
+
+ LDYIM ARGT
+ LDAIM &80
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN ;*** Call DIRMAN.PRESERVE **
+ BNE FICRFB ;Failed
+ JSR OBJCLR ;Clear old object out of map & cache if nesc.
+ BNE FICRFB ;**** 17/3/83 ****
+
+;Have created file: fabricate DIRMAN.RETRIEVE info
+;in DETRAM buffer (disc no. and SIN already there)
+;and on NEWARG stack.  Need to include only access
+;info and size.
+
+ LDAIM ACCDEF ;Default access
+ STA DETACC
+
+ LDAIM FIFLSZ ;Size (LS)
+ STA DETSZ
+ LDAIM /(FIFLSZ ) ;Size (CS)
+ STA DETSZ + 1
+ LDAIM 0 ;Size (MS)
+ STA DETSZ + 2
+
+;Need to put type of object & max access
+;allowed on NEWARG stack at ARGB (because
+;DIRMAN.RETRIEVE does).
+
+ LDAIM RDWRAC ;Read/write access
+ ORAIM TYPFIL ;Type = file
+ LDYIM ARGB
+ STAIY NEWARG
+
+ LDAIM 0 ;return code
+ RTS
+
+;Failed to do preserve - must free space
+
+FICRFB STA COTEMP + 1 ;Save RC
+
+ JSR FIDSIN ;Disc no. & SIN to stack
+
+ LDYIM ARGF
+ JSR SETUSE ;pass pointer to user info ** 3/10/84 **
+
+ LDAIM MAPFS ;MAPMAN.FREESPACE
+ JSR SETRTN
+
+ JSR MAPMAN ;*** MAPMAN.FREESPACE **
+ BEQ FICRFC ;OK
+ JSR INTERR ;Never happens?
+
+FICRFC LDA COTEMP + 1 ;Get back RC from Preserve
+
+ RTS
+
+
+
+;*** FIDSIN ***
+
+;Copy disc no. and SIN from DETRAM (=COWORK) buffer
+;to NEWARG stack
+
+FIDSIN LDYIM ARGB
+ LDA DETDIS ;Disc no (LS)
+ STAIY NEWARG
+ LDA DETDIS + 1 ;Disc no (MS)
+ INY
+ STAIY NEWARG
+
+ LDA DETSIN ;SIN (LS)
+ INY
+ STAIY NEWARG
+ LDA DETSIN + 1 ;SIN (CS)
+ INY
+ STAIY NEWARG
+ LDA DETSIN + 2 ;SIN (MS)
+ INY
+ STAIY NEWARG
+ RTS
+
+
+
+;***********
+;*  E O F  *
+;***********
+
+CPEOF
+
+;Calls RDEOF and returns $FF if HWM<=SFP, zero
+;otherwise.
+
+ JSR STKUSE
+ BNE CPEOFZ ;User not valid
+
+ LDX BPTR
+ LDAAX MIDRX
+ INY
+ STAIY NEWARG ;Set handle of file
+ LDAIM &F
+ JSR SETRTN
+ JSR RNDMAN ;Do End of File call
+ BNE CPEOFZ ;Error -> pass on
+ LDYIM ARGB
+ LDAIY NEWARG ;Get result from randman
+ STA MIDTX
+ LDAIM TXHDR + 1
+ JSR REPLYC
+ JMP COMRTS
+
+CPEOFZ JSR RCODE ;Return error
+ JMP COMRTS
+
+;*****************************
+;* Return free space on disc *
+;*****************************
+
+CPSPAC
+ JSR RDTITL
+ BNE CPSPAX ;syntax error ?
+ LDYIM ARGA
+ JSR SBUFPT ;put pointer on stack
+
+ LDAIM 10
+ LDYIM ARGA
+ STAIY NEWARG ;pass argument
+
+ JSR MAPMAN ;name -> number
+ BNE CPSPAX ;skip on error
+
+;returns:
+;ARGB = LS disc number
+;ARGC = MS disc number
+
+ LDAIM 12 ;new entry point 21/3/83
+ LDYIM ARGA
+ STAIY NEWARG ;pass argument
+
+ JSR MAPMAN
+ BNE CPSPAX ;skip on error
+
+ LDXIM 5
+ LDYIM ARGG ;ready to copy data back
+CPSPA1 LDAIY NEWARG
+ STAAX MIDTX
+ DEY
+ DEX
+ BPL CPSPA1 ;return three bytes
+
+ LDAIM 0
+ STA CCODE ;zero command code
+ LDAIM TXHDR + 6 ;massage length
+ JSR REPLYC ;send back result
+ JMP COMRTS
+
+CPSPAX
+ [ 1=0
+ JSR EXTERR
+ JMP COMRTS ;ON ERROR .....
+ |
+ JMP ERROR
+ ]
+
+RDFREE ;return callers free space
+
+ JSR STKUSE
+ BNE RDFREX
+ 
+ LDYIM ARGC
+ LDX BPTR
+ LDAAX MIDRX
+ CMPIM CR
+ BNE RDFREJ ;no argument
+
+ LDA USTPTR
+ CLC
+ ADCIM UTUSID
+ STA USTPTR
+ BCC RDFREI
+ INC USTPTR+1
+
+RDFREI JSR SETUSE ;set the user pointer on stack
+ JMP RDFREK
+
+RDFREJ LDAIM HDRLEN+0
+ JSR SETFTP ;point to user name
+
+RDFREK LDAIM 9
+ JSR SETRTN
+ JSR AUTMAN
+ BNE RDFREX
+ 
+ LDXIM 3
+ LDYIM ARGB+3
+RDFREA LDAIY NEWARG
+ STAAX MIDTX
+ DEY
+ DEX
+ BPL RDFREA
+ LDAIM 0
+ STA CCODE
+ LDAIM HDRLEN+4
+ JSR REPLYC
+ JMP COMRTS
+
+RDFREX JMP ERROR
+
+WRFREE ;set user free space
+
+ JSR STKUSE
+ BNE RDFREX ;common error exit
+
+ LDYIM ARGC
+ LDAIM HDRLEN+4 ;offset of name
+ JSR SETFTP ;pointer to name
+
+ LDX BPTR
+ LDYIM ARGF
+WRFREA LDAAX MIDRX
+ STAIY NEWARG
+ INX
+ INY
+ CPYIM ARGF+4
+ BNE WRFREA
+
+ LDAIM 10
+ JSR SETRTN
+ JSR AUTMAN
+ JSR RCODE ;reply with zero RC
+ JMP COMRTS ;else all ok
+
+ LNK UADE19
