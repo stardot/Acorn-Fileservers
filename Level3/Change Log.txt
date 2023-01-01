@@ -21,7 +21,7 @@ HEADER FILE 1
          Uade01 Line 0059 VERLA and VERLB, version changed from 90 to 01
 
 HEADER FILE 2
-         Uade02 Line 0016 User ID size expanded to from MAXUNM to MAXUNM+1
+         Uade02 Line 0016 User ID size expanded from MAXUNM to MAXUNM+1
 15/12/85 Uade02 Line 0209 Number of bit map cache blocks changed from 5 to 15
          Uade02 Line 0286 Check for free storage with dongle absent changed from
                           &8A00 to &8B00 and present &8B00 to &8C00 
