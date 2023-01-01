@@ -1,0 +1,30 @@
+Version 0.90 Pre-Release IV.05
+==============================
+
+Date - estimated. May-Oct 1985 (possibly 4 May from the pre-release version). 
+       Two comments are dated after that date but with code included in the 
+       binary. The comments could have been added at a later date to already
+       existing code or versions were kept the same but the code was different.
+       That would date the code to Oct 1985. There are changes labelled 
+       15/12/85 that are not in this binary. The assembler directive file FSASM
+       has the comment updated by Glenn 8/5/85.
+       
+Binary Files (* denotes the official ACORN released version)
+============
+* FS3-090  - Dongle absent
+  FS3-090b - Dongle absent. BARSON COMPUTERS variant
+
+Comments
+========
+There are two Trace debug pieces of code in the final binary although the 
+DEBUG directive is set to 0 (file Uade14) and the binary performs a simple RTS
+when it is called.
+
+There is also a version of the same code with the banner displaying BARSON
+COMPUTERS. Barson were one of Acorn's distributors in Australia and it looks
+like the branding was probably done by hex editing the binary directly rather 
+than altering the code.
+
+Changes
+=======
+No previous version to compare to.
