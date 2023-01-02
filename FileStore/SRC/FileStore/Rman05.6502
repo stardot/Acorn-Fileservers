@@ -1,0 +1,244 @@
+ OPT RMAN05 ;RNDMAN > Rman05
+ TTL File server file RMAN05
+
+
+;** RNDMAN UTILS **
+
+;*** GETRND ***
+
+;Get free slot in RANDTB.
+
+;Exit: A = RC
+;RTEPTR = Ptr to free RANDTB entry
+
+GETRND ROUT
+ LDA RANDTB ;RTEPTR := RANDTB
+ STA RTEPTR
+ LDA RANDTB+1
+ STA RTEPTR+1
+
+ LDX RTNENT ;X := no. of entries in RANDTB
+ LDYIM RTINUS ;Y := offset of "in use" byte in entry
+
+10 LDAIY RTEPTR ;Get an "in use" byte
+ BEQ #20 ;Free entry found - exit A=0, Z set
+
+ CLC  ;RTEPTR +:= entry size
+ LDAIM RTENSZ
+ ADC RTEPTR ;LS byte
+ STA RTEPTR
+ BCC #15
+ INC RTEPTR+1 ;MS byte
+15 DEX  ;Any entries left?
+ BNE #10 ;Jump if yes
+
+;No entries left
+
+ LDAIM RDERRG ;"RANDTB full"
+20 RTS
+
+
+;*** RDCKAC ***
+
+;Check that the requested access to a file is allowed.
+;Check first that the access is allowed in
+;the directory entry, and secondly that it can
+;be granted within a multiple reader / single
+;writer regime (by scanning HANDTB).
+
+;Entry: ARGD (on ARGPTR) = requested access
+;ARGE = allowed access (from directory entry)
+;RNDPTR points to object details
+
+;Exit:  A = RC
+;HNDPTR is corrupted
+
+RDCKAC ROUT
+ LDYIM ARGD
+ LDAIY ARGPTR ;Get requested access
+ ANDIM RDWRAC ;Mask out type bit
+ STA RNDTMP ;Keep masked copy
+ INY
+ ANDIY ARGPTR ;AND with allowed access
+ CMP RNDTMP ;Should equal requested access
+ BEQ #10 ;Access allowed
+ LDAIM RDERRK ;"Access not allowed"
+ RTS
+
+10 JSR INITHD ;HNDPTR := HANDTB; X := no. of entries
+
+20 LDYIM HTHAND
+ LDAIY HNDPTR ;Is this an empty entry?
+ BEQ #30 ;Skip if empty
+
+;A used HANDTB entry: check disc no. and SIN
+;against those of file we want to open.
+
+ LDYIM INFDIS ;Compare disc numbers
+ LDAIY RNDPTR
+ LDYIM HTDISC
+ CMPIY HNDPTR
+ BNE #30 ;LS bytes differ
+ LDYIM INFDIS+1
+ LDAIY RNDPTR
+ LDYIM HTDISC+1
+ CMPIY HNDPTR
+ BNE #30 ;MS bytes differ
+
+ LDYIM INFSIN ;Compare SINs
+ LDAIY RNDPTR ;A := LS byte of SIN for OPEN
+ LDYIM HTSIN
+ CMPIY HNDPTR
+ BNE #30 ;LS bytes differ
+ LDYIM INFSIN+1
+ LDAIY RNDPTR
+ LDYIM HTSIN+1
+ CMPIY HNDPTR
+ BNE #30 ;CS bytes differ
+ LDYIM INFSIN+2
+ LDAIY RNDPTR
+ LDYIM HTSIN+2
+ CMPIY HNDPTR
+ BNE #30 ;MS bytes differ
+
+;Have found an existing HANDTB entry for the SIN
+;we want to open.
+;Open can be permitted only if it is for reading,
+;and the file is not already open for writing.
+
+ LDYIM HTMODE
+ LDAIY HNDPTR ;A := mode in which already open
+ LDYIM ARGD
+ ORAIY ARGPTR ;OR requested access with that already granted
+ ANDIM WRITAC ;Look at write access bit
+ BEQ #30 ;Both for reading - proceed with search
+
+;The file is already open, and:
+;either the request includes write access, or the
+;file is already open with write access.
+
+ JSR RDopat ;record 'open at' details
+ LDAIM RDERRH ;"File in use"
+ RTS
+
+;Have not yet found a reason to disallow the
+;OPEN. Keep looking!
+
+30 JSR INCHND ;Point HNDPTR at next entry; X -:= 1
+ BNE #20 ;back to start of loop
+
+;Have searched all of HANDTB - open may proceed
+
+ LDAIM 0 ;set RC
+ RTS
+
+
+
+;*** RDopat ***
+
+;Record details of station at which a file is open (for use in error
+; messages).  HNDPTR points to the handle table entry for the object.
+
+RDopat ROUT ;**20/5/87**
+ LDYIM HTMCNO
+ LDAIY HNDPTR
+ STA MCopat
+ INY
+ LDAIY HNDPTR
+ STA MCopat+1
+ INY
+ LDAIY HNDPTR
+ STA MCopat+2
+ RTS
+
+      
+;*** CLRRTE ***
+
+;Clear entry in RANDTB pointed to by HANDTB entry
+;whose address is in HNDPTR.
+
+CLRRTE ROUT
+ JSR SETRPT ;RTEPTR := address of RANDTB entry
+
+ LDYIM RTENSZ-1 ;Y := size of RANDTB entry
+ LDAIM 0
+10 STAIY RTEPTR ;Clear whole entry to zero
+ DEY
+ BPL #10 ;Loop if more to do
+ RTS  ;No result
+
+
+
+;*** RDFLSH ***
+
+;Flush all blocks of an object from cache.
+;Called from CLRHTE when closing a file.
+
+;Entry: HNDPTR contains address of HANDTB entry
+
+RDFALL ROUT
+ LDAIM 5 ;STRMAN.remove all blocks
+ BRA #10
+;** 5/8/83 **
+RDFLSH LDAIM 9 ;STRMAN.REMOVEALLDIRTYWONDOWS
+10 JSR SETRTN
+ JSR RDDSIN ;Put disc and SIN on stack
+
+ JMP STRMAN ;*** Call STRMAN **
+
+
+;*** RDSHWM ***
+
+;IF seq file ptr > high water mark
+;THEN high water mark := seq file ptr
+
+;Entry: RTEPTR points to RANDTB entry
+
+RDSHWM ROUT
+ JSR CMPHWP
+ BCS #10 ;SFP <= HWM, return
+
+ LDYIM RTCSFP ;SFP > HWM, so copy
+ LDAIY RTEPTR ;SFP to HWM field
+ LDYIM RTHWM
+ STAIY RTEPTR ;LS byte
+ LDYIM RTCSFP+1
+ LDAIY RTEPTR
+ LDYIM RTHWM+1
+ STAIY RTEPTR ;CS byte
+ LDYIM RTCSFP+2
+ LDAIY RTEPTR
+ LDYIM RTHWM+2
+ STAIY RTEPTR ;MS byte
+10 RTS
+
+
+
+;Compare High Water Mark with Seq. file
+;ptr. and return CC if SFP>HWM, CS if
+;SFP<=HWM.
+;Also returns Z flag indicating EQ or not.
+
+;NOTE - corrupts RNDTMP
+
+CMPHWP ROUT
+ SEC
+ LDYIM RTHWM ;Subtract SFP from HWM
+ LDAIY RTEPTR ;LS byte of HWM
+ LDYIM RTCSFP
+ SBCIY RTEPTR ;Subtract LS bytes
+ STA RNDTMP
+ LDYIM RTHWM+1
+ LDAIY RTEPTR
+ LDYIM RTCSFP+1
+ SBCIY RTEPTR ;Subtract CS bytes
+ STA RNDTMP+1
+ LDYIM RTHWM+2
+ LDAIY RTEPTR
+ LDYIM RTCSFP+2
+ SBCIY RTEPTR ;Sets carry if SFP <= HWM
+ ORA RNDTMP
+ ORA RNDTMP+1 ;Return Z flag indicating EQ or not
+ RTS
+
+ LNK UADE0A
