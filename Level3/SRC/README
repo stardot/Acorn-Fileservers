@@ -1,9 +1,8 @@
-Level 3 File Server v1.04
+Level 3 File Server v1.06
 =========================
 
-This disc contains a recreation of the source code for the Acorn Level 3 
-File Server. It has been achieved by using the original binary and the 
-source code from v1.06.
+This disc contains the original source code for the Acorn Level 3 
+File Server. 
 
 Assembling the File Server Source Code
 ======================================
@@ -39,30 +38,33 @@ Files
   Location for the assembled parts. Do not delete or the assembler will fail.
 
 
-Version 1.04
+Version 1.06
 ============
 
-Date - estimated sometime after June 1986. no dated comments after June 1986
+Date - estimated about May 1987. Only one change comment dated 20/5/87
 
 Comments
 ========
+Some of these changes may have been made in v1.05, but there is no binary
+available to investigate. This is the original and unchanged source code.
 
-Changes (from v1.03)
+Changes (from v1.04)
 ====================
 
 HEADER FILE 1
-         Uade01 Line 0060 VERLB, version changed from 3 to 4
-
+         Uade01 Line 0060 VERLB, version changed from 4 to 6
+         
 MAPMAN
-         Uade10 Line 0300 JSR FNDMAP added to check before changing size of a chain
-                          on disc
-         Uade10 Line 0322 BCS branch added
+         Uade10 Line 0300-0301 removed JSR FNDMAP, BNE MPCHJX
+                          when changing the size of a chain on disc
+         Uade10 Line 0322 BCS branch removed
 
-MAP BLOCK AND BIT MAP MANAGEMENT
-         MBBMCM Line 0152 bugfix: Update the cache block descriptor after 
-                          getting a block to store
-
-DSCMAN
-         Uade14 Line 0754 changed disc error reporting text 
-                     0754 "       : Disc Error. " to "Disc Error N0. "
-                     0759 " At " to " At Disc Address "    
+                          
+MAPMAN UTILS 2
+20/05/87 Uade12 Line 1086 bugfix: Map block not being marked as written
+                          after blocks have been deleted
+         Uade12 Line 1054 moved CBNT code block from line 1129 to 1056
+                          inline with other code
+         Uade13 Line 0481 bugfix: in routine MPGTSZ - find size of object
+         Uade13 Line 0567 bugfix: PLA PLA removed from routine
+   

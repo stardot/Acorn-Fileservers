@@ -1,3 +1,42 @@
+Version 1.06
+============
+
+Date - estimated about May 1987. Only one change comment dated 20/5/87
+
+Binary Files (* denotes the official ACORN released version)
+============
+  FS3-106  - Assembler options: DONGLE=1 (absent)
+             This has also been seen as a binary with version 1.07
+* FS3-106d - Assembler options: DONGLE=0 (present)
+
+Comments
+========
+Some of these changes may have been made in v1.05, but there is no binary
+available to investigate. This is the original and unchanged source code.
+
+Changes (from v1.04)
+====================
+
+HEADER FILE 1
+         Uade01 Line 0060 VERLB, version changed from 4 to 6
+         
+MAPMAN
+         Uade10 Line 0300-0301 removed JSR FNDMAP, BNE MPCHJX
+                          when changing the size of a chain on disc
+         Uade10 Line 0322 BCS branch removed
+
+                          
+MAPMAN UTILS 2
+20/05/87 Uade12 Line 1086 bugfix: Map block not being marked as written
+                          after blocks have been deleted
+         Uade12 Line 1054 moved CBNT code block from line 1129 to 1056
+                          inline with other code
+         Uade13 Line 0481 bugfix: in routine MPGTSZ - find size of object
+         Uade13 Line 0567 bugfix: PLA PLA removed from routine
+       
+       
+-------------------------------------------------------------------------------
+
 Version 1.04
 ============
 
