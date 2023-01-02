@@ -7,7 +7,7 @@ The source code for v1.06 is thought to be the original and creates a binary ide
 
 The FileStore 1.31 source code did not contain the MOS part of the ROM, only the Fileserver code. On examination it was clear this was a derivative work of the Level3 source code. 
 
-The source code for the versions 0.90, 0.92, 1.01, 1.03, 1.04 has been recreated using the v1.06 source code and the individual binaries.
+The source code for the versions 0.90, 0.92, 1.01, 1.03, 1.04 have been recreated using the v1.06 source code and the individual binaries.
 
 v1.06 stayed the same as the binary was identical to that produced from the source. It was found the binary for v1.07 was produced from the v1.06 source code but the dongle directive was set to present. This should not result in a different version number.
 
