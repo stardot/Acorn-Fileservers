@@ -28,6 +28,7 @@ START
  = CR,"Acorn File Server Level "
 VERSN = "3 Version 1.",VERLA,VERLB,CR
  = 21,"Version string",6 ;software protection 
+
  = "   File server station "
 
  NOP               ;Print station number LH 21/10/85

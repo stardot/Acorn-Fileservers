@@ -53,11 +53,11 @@ WINCH * &00 ;IF WINCHESTER DISCS
 SYS * &FF ;flags to indicate which type of FS
 ZTIME * &FF
 FS * &FF
-DONGLE * 0 ;Real Time Clock present(=0) absent(=1)
-
+DONGLE * 1 ;Real Time Clock present(=0) absent(=1)
+Y2KPAT * 1 ; no(=0) Apply the JGH Patch (=1)
 
 VERLA * "0"
-VERLB * "6"
+VERLB * "7"
 DEBUG *  0 ;Make this +ve for debug letters
 MASK * &FF ;protection state
 
