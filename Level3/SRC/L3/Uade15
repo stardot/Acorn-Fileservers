@@ -4,9 +4,7 @@
 
 ;*  C O M M A N D  P R O C E S S O R*
 
-CMND
-
- JSR GETBB ;Get big buffer !
+CMND JSR GETBB ;Get big buffer !
 
  JSR VSTRIN
  = CR,"Starting - "
@@ -28,19 +26,19 @@ CLPA LDXIM MONON
 
  LDA &220
  STA OLDEV
- LDA &220 + 1
- STA OLDEV + 1
+ LDA &220+1
+ STA OLDEV+1
 
- LDAIM EVENT
+ LDAIM :LSB:EVENT
  STA &220
- LDAIM /(EVENT)
- STA &220 + 1
+ LDAIM :MSB:EVENT
+ STA &220+1
 
- LDAIM  14
- LDXIM  2 
+ LDAIM 14
+ LDXIM 2 
  JSR OSBYTE ;enable KB event
- LDAIM  229 ;disable escape
- LDXIM  1 
+ LDAIM 229 ;disable escape
+ LDXIM 1 
  JSR OSBYTE
 
  JSR VSTRIN
@@ -52,8 +50,8 @@ CLPA LDXIM MONON
  JSR OSBYTE ;** 13/2/84 **
    ; sever any REMOTE connection now
 
- LDXIM PROT
- LDYIM /PROT
+ LDXIM :LSB:PROT
+ LDYIM :MSB:PROT
  LDAIM &13 ; Net OSWORD
  JSR OSWORD ; Set protection mask
 
@@ -105,53 +103,53 @@ DOQUIT   ;DOQUIT
  JSR SETRTN
  JSR USRMAN ;no RC from this
  JSR FLUSYS
- LDXIM DOBYE
- LDYIM /DOBYE
+ LDXIM :LSB:DOBYE
+ LDYIM :MSB:DOBYE
  JSR OSCLI ;*bye the discs
  JMP INITCO ;Back to COMMAND prompt
 
 DOBYE = "Bye",CR
 
-DOMONT   ;DOMONT
 
 ;Switch monitor and go back to loop start.
 
+DOMONT ROUT
  JSR VSTRIN
  = CR,"Monitor "
  NOP
 
  LDX MONFLG
  CPXIM MONOFF
- BEQ DOMONL
+ BEQ #10
  JSR VSTRIN
  = "OFF"
  NOP
  LDAIM MONOFF
- JMP DOMONJ
+ JMP #20
 
-DOMONL JSR VSTRIN
+10 JSR VSTRIN
  = "ON"
  NOP
  LDAIM MONON
-DOMONJ STA MONFLG
+20 STA MONFLG
 
 DBNCEX JSR OSCRLF
  JMP CLPD ;Go back to main RX loop
 
-DOCMND   ;DOCMND
 
 ;Reception has happened, so check
 ;the function code in the RXbuffer
 ;and jump to the operation.
 
+DOCMND ROUT
  LDA RXCBN ;save CB number
  PHA ;altered in OPENRX
  JSR OPENRX ;open a new Rxcb
  PLA ;RXTAB updated to new CB here
  STA RXCBN ;reset CB number
 
- LDXIM RXCBN
- LDYIM /(RXCBN)
+ LDXIM :LSB:RXCBN
+ LDYIM :MSB:RXCBN
  LDAIM &11 ;MOS interface
  JSR OSWORD ;read the control block
 
@@ -165,7 +163,7 @@ DOCMND   ;DOCMND
  LDAIM &00
  STA QPTR ;standard offset
  SEC
- LDA RXCBV + 4 ;get low byte of address
+ LDA RXCBV+4 ;get low byte of address
  SBCIM RXBUF ;calulate buffer offset
  STA BPTR ;point at the buffer
  TAX
@@ -175,8 +173,8 @@ DOCMND   ;DOCMND
 
  LDA CBBUF
  STA OLDRXB ;STORE OLD BUFFER PTR.
- LDA CBBUF + 1
- STA OLDRXB + 1
+ LDA CBBUF+1
+ STA OLDRXB+1
 
 
 ;Provide p.0 pointer to control block (used
@@ -184,21 +182,21 @@ DOCMND   ;DOCMND
 
  CLC
  LDA QPTR
- ADCIM RXCBV
+ ADCIM :LSB:RXCBV
  STA NETCB
- LDAIM /(RXCBV)
- ADCIM  0
- STA NETCB + 1
+ LDAIM :MSB:RXCBV
+ ADCIM 0
+ STA NETCB+1
 
- LDAAX RXBUF + 1 ;Get fn. code
- BEQ FCOK ;Don't monitor commands immediately
+ LDAAX RXBUF+1 ;Get fn. code
+ BEQ #50 ;Don't monitor commands immediately
 
  PHA
  JSR MONITR ;*** Do monitor **
  PLA
 
- CMPIM FCMAX + 1 ;Is < biggest fn. code +1 ?
- BCC FCOK ;Yes => ok
+ CMPIM FCMAX ;Is < biggest fn. code?
+ BCC #50 ;Yes => ok
 
  LDAIM COERRA
 
@@ -211,18 +209,23 @@ DOCMND   ;DOCMND
 
  JMP COMRTS
 
-FCOK   ;FCOK
-
 ;FN. code is ok, so get routine entry address
 
- ASLA
+50 ASLA
  TAX
+
+ LDY BPTR
+ LDAAY CPUFD ;**20/5/87** set all handles for use
+ STA UMHUFD ;**20/5/87** by pseudo-directory references
+ LDAAY CPLIB
+ STA UMHLIB
+ LDAAY CPCSD
+ STA UMHCSD
+
  LDAAX FNTAB
  STA GENPTR
- LDAAX FNTAB + 1
- STA GENPTR + 1
- LDY BPTR
-
+ LDAAX FNTAB+1
+ STA GENPTR+1
 
 ;ENTER ROUTINE ..
 
@@ -232,17 +235,21 @@ FCOK   ;FCOK
 
 ;T A B L E S
 
-CTABA   ;CTABA
+CTABA ROUT
 
 ;Initial receive control block
-;Top four bytes
+;First 12 bytes - addresses may change
 
  = RXFLAG
  = COPORT ;Command port
- =  0
- =  0 ;Set to RX on any station
+ = 0
+ = 0 ;Set to RX on any station
+ & RXBUF
+ = 0,0
+ & RXBUF+RXBUFL
+ = 0,0
 
-FNTAB   ;FNTAB
+FNTAB ROUT
 
 ;Addresses of functions
 
@@ -279,172 +286,164 @@ FNTAB   ;FNTAB
  & RDFREE ;30 - read callers free space
  & WRFREE ;31 - write users free space
  & CPWHO ;32 - return client user name
+FNusr2 & CPUSRS ;33 - user list with job/task numbers
+FNuin2 & CPUINF ;34 - single user info with job/task number
+FCMAX * (.-FNTAB)/2
 
 ;COMMAND LINE DECODER ....
 
 
-COMTAB = "CAT"
- = CLIDLM
- & /(CAT)
- = "DELETE"
- = CLIDLM
- & /(DELETE)
- = "INFO"
- = CLIDLM
- & /(INFO)
- = "LOAD"
- = CLIDLM
- & /(DOLOAD)
- = "SAVE"
- = CLIDLM
- & /(DOSAVE)
- = "DIR"
- = CLIDLM
- & /(SELDIR)
- = "SDISC"
- = CLIDLM
- & /(SELDSC)
- = "CDIR"
- = CLIDLM
- & /(CDIR)
- = "ACCESS"
- = CLIDLM
- & /(SETACC)
- = "PASS"
- = CLIDL1 
- & /(SETPW)
- = "I AM"
- = CLIDL1
- & /(LOGON)
- = "BYE"
- = CLIDLM
- & /(USROFF)
- = "NEWUSER"
- = CLIDLM
- & /(NEWUSE)
- = "PRIV"
- = CLIDLM
- & /(STPRIV)
- = "LIB"
- = CLIDLM
- & /(SLIB)
- = "REMUSER"
- = CLIDLM
- & /(REMUSE)
- = "RENAME"
- = CLIDLM
- & /(RENAME)
+COMTAB
+
+ [ Lang = English
+ = "DELETE",&A0
+ & DELETE
+ = "INFO",&A0
+ & INFO
+ = "DIR",&A0
+ & SELDIR
+ = "SDISC",&A0
+ & SELDSC
+ = "CDIR",&A0
+ & CDIR
+ = "ACCESS",&A0
+ & SETACC
+ = "PASS",&A0 
+ & SETPW
+ = "I AM",&B0
+ & LOGON
+ = "BYE",&A0
+ & USROFF
+ = "NEWUSER",&A0
+ & NEWUSE
+ = "PRIV",&A0
+ & STPRIV
+ = "LIB",&A0
+ & SLIB
+ = "REMUSER",&A0
+ & REMUSE
+ = "RENAME",&A0
+ & RENAME
  =  0 ;Indicates table end
+ ]
 
+ [ Lang = Italian
+ = "CANCELLA",&A0
+ & DELETE
+ = "INFO",&A0
+ & INFO
+ = "DIR",&A0
+ & SELDIR
+ = "SDISC",&A0
+ & SELDSC
+ = "CDIR",&A0
+ & CDIR
+ = "ACCESSO",&A0
+ & SETACC
+ = "PASSA",&A0 
+ & SETPW
+ = "I SONO",&B0
+ & LOGON
+ = "CIAO",&A0
+ & USROFF
+ = "NUTENTE",&A0
+ & NEWUSE
+ = "PRIV",&A0
+ & STPRIV
+ = "BIBL",&A0
+ & SLIB
+ = "RIMUT",&A0
+ & REMUSE
+ = "RINOME",&A0
+ & RENAME
+ =  0 ;Indicates table end
+ ]
 
-CLINE LDXIM &FF
+CLINE ROUT
+ LDXIM &FF
  CLD
-THUNK LDY BPTR
+10 LDY BPTR
  JSR SPACES
  DEY
-FIRCH INY
+20 INY
  INX
  LDAAX COMTAB
  BEQ BADCOM ;Last delimiter is zero
- CMPIM CLIDL1
- BEQ CHKLST
- CMPIM CLIDLM
- BEQ CHKLST ;Check next char after command is non-alpha
+ BMI #50 ;Check next char after command is non-alpha
  EORAY MIDRX ;Compare
  ANDIM &DF ;Force cases
- BEQ FIRCH
+ BEQ #20
  DEX
-MINUS INX
+30 INX
  LDAAX COMTAB
- CMPIM CLIDL1
- BEQ MINUS1
- CMPIM CLIDLM
- BNE MINUS
-MINUS1 INX  ;Get past CLIDLM
- INX
+ BPL #30
  LDAAY MIDRX
  CMPIM "."
- BNE THUNK
+ BNE #55
  INY
- DEX ;Point to address
- DEX
- BCS FINISH ;Always jump
+ JMP #60
 
-CHKLST LDAAY MIDRX ;Otherwise check char. after cmnd. is non-alpha
+50 LDAAY MIDRX ;Otherwise check char. after cmnd. is non-alpha
  JSR ISCHAR
- BCS FINISH ;Is non-alpha => end of command
- INX
- INX ;Inc. past CLIDLM and address
- BCC THUNK ;Always jump
+ BCS #60 ;Is non-alpha => end of command
+55 INX
+ INX ;Inc. past terminator and address
+ JMP #10
 
-FINISH LDAAX COMTAB ;Check if is to be monitored or not
- CMPIM CLIDL1
- BEQ CLINE3 ;Non-monitor command (LOGON and PASS)
+60 LDAAX COMTAB+1 ;Get command processor address
+ STA Cozero
+ LDAAX COMTAB+2
+ STA Cozero+1
+ JMI Cozero ;Enter command processor
 
- TXA
- PHA ;Store table offset
- LDAIM  0 ;Set function code
- STY COTEMP ;Store command line pointer
- LDY QPTR ;Point to receive buffer
- JSR MONITR ;Do monitor message
- LDY COTEMP ;Restore command line pointer
- PLA
- TAX ;Restore table offset
-
-CLINE3 LDAAX COMTAB + 1 ;Set jump addresses
- STA GENPTR + 1
- LDAAX COMTAB + 2
- STA GENPTR
-
-
- CLC
- LDXIM  0
- JMI GENPTR
-
-
-BADCOM
 
 ;UNRECOGNISED COMMAND
 
+BADCOM ROUT
  JSR BUFTXT
- BNE BDEXIT ;Quotes error
- LDXIM  0 ;Now move from TXTBUF to TXBUF
-BCLOOP LDAAX TXTBUF
+ BNE #30 ;Quotes error
+ LDXIM 0 ;Now move from TXTBUF to TXBUF
+10 LDAAX TXTBUF
  STAAX MIDTX
  INX
  CMPIM CR
- BNE BCLOOP
+ BNE #10
 
- CPXIM  1
- BNE BCONA
+ CPXIM 1
+ BNE #20
  LDAIM WOTERR
  JSR EXTERR ;Do WHAT? error immediately
- JMP BDEXIT
-BCONA TXA
+ JMP #30
+
+20 TXA
  CLC
  ADCIM TXHDR ;Message length
  LDYIM CCCMND
  STY CCODE
  JSR REPLYC
-BDEXIT JMP COMRTS
+30 JMP COMRTS
+
+ [ Lang = English
+40 = "Bad command in ",0
+ ]
+ [ Lang = Italian
+40 = "Comando errato nel ",0
+ ]
 
 
-
-
-MONITR   ;MONITR
-
+MONITR ROUT
  BIT MONFLG
- BPL MONEX ;bit7=0 -> no monitor
+ BPL #15 ;bit7=0 -> no monitor
 
  LDXIM MONTL ;length of the 'monitored' function codes table
  
-MON1 CMPAX MONT1 ;look for function match
- BEQ MON2 ;found one
+10 CMPAX MONT1 ;look for function match
+ BEQ #20 ;found one
  DEX
- BPL MON1 ;if fall thru' then exit
-MONEX RTS
+ BPL #10 ;if fall thru' then exit
+15 RTS
 
-MON2 STX COTEMP+1 ;save this for later use
+20 STX COTEMP+1 ;save this for later use
  JSR PRTMC ;print the machine number
 
  JSR VSTRIN
@@ -453,42 +452,42 @@ MON2 STX COTEMP+1 ;save this for later use
 
  LDYIM 0
  LDX COTEMP+1
- BEQ MON11 ;CLI here
+ BEQ #65 ;CLI here
 
-MON3 LDAAY MONT3 ;read though the text
- BEQ MON4 ;count the number so far
+30 LDAAY MONT3 ;read though the text
+ BEQ #40 ;count the number so far
  INY
- BNE MON3
-MON4 INY
+ BNE #30
+40 INY
  DEX
- BNE MON3
+ BNE #30
  LDX COTEMP+1
 
-MON5 LDAAY MONT3 ;now at the correct operation
- BEQ MON6
+50 LDAAY MONT3 ;now at the correct operation
+ BEQ #60
  JSR WRCH ;print ascii chars only
  INY ;step thru'
- BNE MON5 ;stop on zero 
+ BNE #50 ;stop on zero 
 
-MON6 JSR MONOUT ;print a space
-MON11 LDAAX MONT2 ;determine objectname offset (if any)
- BMI MON9 ;none here
+60 JSR MONOUT ;print a space
+65 LDAAX MONT2 ;determine objectname offset (if any)
+ BMI #90 ;none here
 
  CLC
  ADC BPTR
  TAY ;Y has offset within the buffer
 
-MON7 LDAAY MIDRX ;get chars from Rx buffer
+70 LDAAY MIDRX ;get chars from Rx buffer
  CMPIM CR ;end of name
- BEQ MON8
+ BEQ #80
  JSR WRCH ;print the name
  INY
- BNE MON7
+ BNE #70
 
-MON8 JSR MONOUT ;print another space
+80 JSR MONOUT ;print another space
 
-MON9 LDAAX MONT4 ;determine size offset (if any)
- BMI MON10
+90 LDAAX MONT4 ;determine size offset (if any)
+ BMI #95
  CLC
  ADC BPTR
  TAY ;Y has offset within the buffer
@@ -500,13 +499,13 @@ MON9 LDAAX MONT4 ;determine size offset (if any)
  LDAAY MIDRX
  JSR WHEX
 
-MON10 JMP OSCRLF
+95 JMP OSCRLF
 
 
 WRCH CMPIM &7F
- BCS MONEX
+ BCS #15
  CMPIM &20
- BCC MONEX
+ BCC #15
  JMP OSASCI ;print ascii characters
 
 MONT1 = 0,1,2,5,20,23,27,29 ;function codes
@@ -526,23 +525,24 @@ MONTL * MONT2-MONT1-1
 
 
  [ 1=0
-PRTMC   ;PRTMC
 
 ;Print machine number.
 
- LDA CBSTID + 1
- BEQ PRMCLA ;Net. no. = 0
+PTRMC ROUT
+ LDA CBSTID+1
+ BEQ #10 ;Net. no. = 0
  JSR WRTDEC
- JMP PRMCLB
-PRMCLA JSR VSTRIN
+ JMP #20
+10 JSR VSTRIN
  = "   "
  NOP
-PRMCLB LDAIM SPACE
+20 LDAIM SPACE
  JSR OSWRCH
  LDA CBSTID
 
-WRTDEC STA TEMPA
- LDAIM  0
+WRTDEC ROUT
+ STA TEMPA
+ LDAIM 0
  STA TEMPB
  TXA
  PHA
@@ -551,9 +551,9 @@ WRTDEC STA TEMPA
  LDXIM "/" ;Hundreds
  LDA TEMPA
  SEC
-WRTDLA SBCIM &64
+10 SBCIM &64
  INX
- BCS WRTDLA
+ BCS #10
  ADCIM &64
  PHA
  TXA
@@ -561,9 +561,9 @@ WRTDLA SBCIM &64
  LDXIM "/" ;Tens
  PLA
  SEC
-WRTDLB SBCIM &A
+20 SBCIM &A
  INX
- BCS WRTDLB
+ BCS #20
  ADCIM &A
  PHA
  TXA
@@ -579,84 +579,107 @@ WRTDLB SBCIM &A
  TAX
  RTS
 
+WRTDIG ROUT
+ CMPIM "0"
+ BNE #10
+ BIT TEMPB
+ BMI #20
+ LDAIM SPACE
+ BNE #20
+10 DEC TEMPB ;Only works for 15 leading spaces
+20 JMP OSWRCH
+
  |
 
-PRTMC LDXIM 4
+PRTMC ROUT
  LDA CBSTID+1
- BEQ PRTMC1
+ BEQ #05
 
  JSR MKDEC ;make decimal
- JSR PRTMC2 ;print the network number
+ JSR #30 ;print the network number
+ LDAIM "."
+ JSR OSWRCH
+ JMP #15 
 
- LDXIM 1
-PRTMC1 LDAIM SPACE
+05 LDXIM 4
+10 LDAIM SPACE
  JSR OSWRCH
  DEX
- BNE PRTMC1 ;print spaces
+ BNE #10 ;print spaces
 
- LDA CBSTID
+15 LDA CBSTID
  JSR MKDEC ;convert to decimal
+ JSR #30
+ LDXIM 4
+ LDA CBFLG
+ ANDIM MCtask ;**12/6/87** isolate job/task number
+ BEQ #20
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ PHA
+ LDAIM "["
+ JSR OSWRCH
+ PLA
+ JSR WHEXD
+ LDAIM "]"
+ JSR OSWRCH
+ LDXIM 1
+20 LDAIM SPACE
+ JSR OSWRCH
+ DEX
+ BNE #20
+ RTS
 
-PRTMC2
- LDA COWORK ;msig digit
+30 LDA COWORK ;msig digit
  JSR OSWRCH
  LDA COWORK+1
  JSR OSWRCH
  LDA COWORK+2
  JMP OSWRCH ;print all three characters in COWORK
 
-MKDEC
- TAY
 
- LDAIM -1
+;Convert to decimal
+
+MKDEC ROUT
+ TAY
+ LDAIM &FF
  STA TEMPA ;leading zero flag
 
  LDAIM 100
- JSR MKDEC1
+ JSR #10
  STA COWORK
  LDAIM 10
- JSR MKDEC1
+ JSR #10
  STA COWORK+1
  LDAIM 1
 
-MKDEC1 STA COWORK+3
+10 STA COWORK+3
  TYA
  LDXIM "0"-1
  SEC
 
-MKDEC2 INX
+20 INX
  SBC COWORK+3
- BCS MKDEC2
+ BCS #20
  ADC COWORK+3
 
  CPXIM "0"
- BNE MKDEC3
+ BNE #30
  BIT TEMPA
- BPL MKDEC3
+ BPL #30
  LDXIM SPACE
- BNE MKDEC4
+ BNE #40
 
-MKDEC3 INC TEMPA ;print zeros
-MKDEC4 TAY ;restore original parameter
+30 INC TEMPA ;print zeros
+40 TAY ;restore original parameter
  TXA
  STA COWORK+2 ;save this for now
  RTS
-
  ]
 
- [ 1=0
-WRTDIG CMPIM "0"
- BNE WRTDIK
- BIT TEMPB
- BMI WRTDIM
- LDAIM SPACE
- BNE WRTDIM
-WRTDIK DEC TEMPB ;Only works for 15 leading spaces
-WRTDIM JMP OSWRCH
- ]
-
-CHDISC   ;CHDISC
-
+;CHDISC
 ;1) READ DRIVE NUMBER (IF DRIVES>1)
 ;2) GET DISC NUMBER FOR DRIVE
 ;3) FLUSH ALL OBJECTS FROM STORE
@@ -664,62 +687,62 @@ CHDISC   ;CHDISC
 ;5) RESTART (MAPMAN)
 ;6) RESTART (AUTMAN)
 
+CHDISC ROUT
  LDA DRIVES
  SEC
  SBCIM  1
- BEQ CHDILA ;ONE DRIVE, CONTINUE
+ BEQ #10 ;ONE DRIVE, CONTINUE
 
  JSR RDDRIV
- BNE CHDIQ ;IF QUIT TYPED, QUIT ** 13/9/84
+ BNE #50 ;IF QUIT TYPED, QUIT ** 13/9/84
 
-CHDILA PHA  ;STORE DRIVE NO.
+10 PHA  ;STORE DRIVE NO.
  JSR CHMSG ;"CHANGING DRIVE - ??"
  PLA
  STA CURDRV
  JSR DRVINF ;GET DISC NO.
 
- BNE CHDIAB ;ABORT IF ERROR
+ BNE #40 ;ABORT IF ERROR
 
- LDAIM  8
+ LDAIM 8
  JSR SETRTN
  JSR STRMAN ;*** FLUSH STORE **
- BNE CHDIAB
+ BNE #40
 
- LDAIM  6
+ LDAIM 6
  JSR SETRTN
  JSR MAPMAN ;*** ENSURE DISC **
- BNE CHDIAB
+ BNE #40
 
-CHDILB JSR CHMSGA ;"LOAD NEW DISC"
- BNE CHDIQ ;IF ABORT, ABORT ** 13/9/84 **
+20 JSR CHMSGA ;"LOAD NEW DISC"
+ BNE #50 ;IF ABORT, ABORT ** 13/9/84 **
 
  LDA CURDRV
  LDYIM ARGB
  STAIY NEWARG
- LDAIM  9
+ LDAIM 9
  JSR SETRTN
  JSR MAPMAN ;*** RESTART DRIVE **
- BEQ CHDIOK ;ALL WELL, FINISH
+ BEQ #30 ;ALL WELL, FINISH
 
  JSR USRERR ;ERROR, PRINT MESSAGE
- JMP CHDILB
+ JMP #20
 
-CHDIOK JSR GETPWF ;Restart AUTMAN
+30 JSR GETPWF ;Restart AUTMAN
  JSR VSTRIN
  = CR,"Restarting - "
  NOP
 
  RTS
 
-CHDIAB JSR INTERR
-CHDIQ JSR FLUSYS ;clear out the system
+40 JSR INTERR
+50 JSR FLUSYS ;clear out the system
  JMP INITCO ;** 13/9/84 ** return to command prompt after abort
 
 
-RDDRIV   ;RDDRIV
-
 ;READ DRIVE NUMBER FROM CMND. LINE
 
+RDDRIV ROUT
  JSR VSTRIN
  = CR,"Drive: "
  NOP
@@ -730,15 +753,15 @@ RDDRIV   ;RDDRIV
  LDAIY COMPTR
  ANDIM &DF ;force upper case
  CMPIM ABTCH ;ABORT ?? "Q"
- BNE RDDONA ;** 13/9/84 **
+ BNE #10 ;** 13/9/84 **
 
  LDAIM &FF
- BNE RDDREX ;ABORT ...
+ BNE #20 ;ABORT ...
 
-RDDONA JSR GETINT ;GET DRIVE NO.
+10 JSR GETINT ;GET DRIVE NO.
  BNE RDDRIV ;DO AGAIN IF NESC.
 
- LDA INTEGR + 1
+ LDA INTEGR+1
  BNE RDDRIV
 
  LDA INTEGR
@@ -746,12 +769,11 @@ RDDONA JSR GETINT ;GET DRIVE NO.
  BCS RDDRIV ;INTEGR>=DRIVES -> ERROR
 
  LDXIM  0 ;GIVE Z SET EXIT
-RDDREX RTS
+20 RTS
 
 
 
-CHMSG   ;CHMSG
-
+CHMSG ROUT
  PHA
  JSR VSTRIN
  = CR,"Changing drive - "
@@ -763,145 +785,124 @@ CHMSG   ;CHMSG
 
 
 
-CHMSGA   ;CHMSGA
-
+CHMSGA ROUT
  JSR VSTRIN
  = CR,"Load new disc",CR
  NOP
 
-CHMALP JSR OSECHO ;fudge around ESCAPE problem ** 28/9/84 **
+10 JSR OSECHO ;fudge around ESCAPE problem ** 28/9/84 **
  CMPIM SPACE
- BEQ CHMAEX
+ BEQ #20
  ANDIM &DF ;force upper case ** 13/9/84 **
  CMPIM ABTCH
- BNE CHMALP
+ BNE #10
 
  LDAIM &FF ;GIVE ABORT EXIT
-
-CHMAEX RTS
-
+20 RTS
 
 
-GETPWF
 
 ;Call AUTMAN restart and write message
 ;if PW file not found.
 
+GETPWF ROUT
  LDAIM  6
  LDYIM ARGA
  STAIY NEWARG
  JSR AUTMAN
- BEQ GETPWX
+ BEQ #10
 
  JSR VSTRIN
  = CR,"WARNING - PW File not found"
  NOP
 
-GETPWX RTS
+10 RTS
 
-EVENT
+EVENT ROUT
  PHP ;save status over routine
  PHA
  CMPIM  2
- BNE EVENT1
+ BNE #10
  STY EVCHAR
  PLA
  PLP
  RTS
 
-EVENT1
- PLA
+10 PLA
  PLP
  JMI OLDEV ;unknown event
 
-NOEVNT
- LDAIM  15
- LDXIM  0
+NOEVNT ROUT
+ LDAIM 15
+ LDXIM 0
  JSR OSBYTE ;flush buffer
 
- LDAIM  13
- LDXIM  2
+ LDAIM 13
+ LDXIM 2
  JSR OSBYTE ;disable event
- LDAIM  229
- LDXIM  0
+ LDAIM 229
+ LDXIM 0
  JSR OSBYTE ;re-enable escape
 
  LDA OLDEV
  STA &220
- LDA OLDEV + 1
- STA &220 + 1
+ LDA OLDEV+1
+ STA &220+1
 
  LDX RXCBN ;get CB number
- LDAIM  52
+ LDAIM 52
  JMP OSBYTE ;delete open CB
 
-OPENRX LDXIM  4 ;Table offset
-CLPC LDAAX CTABA
- STAAX RXCBV ;Set flag, port and stid.
+; Routine to open RECEIVE CB
+
+OPENRX ROUT
+ LDXIM 11 ;Table offset
+10 LDAAX CTABA
+ STAAX RXCBV ;Set flag, port and stid and bfr addresses.
  DEX
- BPL CLPC
+ BPL #10
 
- INX
- STX RXCBV + 6 ;Rx into parasite side of TUBE
- STX RXCBV + 7
- STX RXCBV + 10
- STX RXCBV + 11 ;fill in top bytes
- STX RXCBN ;ready for OSWORD call
+ LDAIM 0
+ STA RXCBN ;ready for OSWORD call
 
-;Now set buffer pointers. The start
-;of a buffer for one cb. is 1+end of buffer fr
-;previous cb (kept in TEMP). So the end address
-;is stored in TEMP and incremented adter setting
-;buffer pointers.
+;Now correct buffer pointers if second buffer.
 ;The one byte gap between the buffers
 ;is to prevent corruption when a zero is placed
 ;at the end of received data to prevent
 ;catastrophe when a bad file name is being
 ;decoded.
 
- LDAIM RXBUF
- STA RXCBV+ 4
- LDAIM /(RXBUF)
- STA RXCBV + 5
-
- LDAIM RXBUF +RXBUFL
- STA RXCBV + 8
- LDAIM /(RXBUF +RXBUFL)
- STA RXCBV + 9
-
  LDA RIPPLE
  INC RIPPLE
  LSRA ;flag in carry
 
- BCC CONB
+ BCC #20
 
- LDAIM RXBUF +RXBUFL + 1
- STA RXCBV+ 4
- LDAIM /(RXBUF +RXBUFL + 1)
- STA RXCBV + 5
+ LDAIM :LSB:(RXBUF+RXBUFL+1)
+ STA RXCBV+4
+ LDAIM :MSB:(RXBUF+RXBUFL+1)
+ STA RXCBV+5
 
- LDAIM RXBUF +RXBUFL +RXBUFL + 1
- STA RXCBV + 8
- LDAIM /(RXBUF +RXBUFL +RXBUFL + 1)
- STA RXCBV + 9
-
-CONB   ;CONB
+ LDAIM :LSB:(RXBUF+RXBUFL+RXBUFL+1)
+ STA RXCBV+8
+ LDAIM :MSB:(RXBUF+RXBUFL+RXBUFL+1)
+ STA RXCBV+9
 
 ;At this point, previous CB is set to receive.
 
- LDXIM RXCBN
- LDYIM /RXCBN
+20 LDXIM :LSB:RXCBN
+ LDYIM :MSB:RXCBN
  LDAIM &11
  JSR OSWORD ;do OPENRX
 
  LDA RXCBN
  STA RXTAB ;save CB number
- BNE CONC
+ BNE #30
 
  LDAIM IERRAI ;unable to open Rxcb
  JMP INTERR
 
-CONC RTS
+30 RTS
 
 
  LNK UADE16
