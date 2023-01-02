@@ -1,3 +1,43 @@
+Version 1.24
+============
+
+Date - estimated between Jun 87 and Feb 1988.
+
+Comments for the language switch in Italian 18/2/87 predate v1.06 comments
+but this change is not in that code - this is likely a typo for 18/2/88 when
+other comments were made. Other dates in comments in this version
+include 1/2/12/15/26 June 1987, 1/9/24 July 1987, 8/18/24 Feb 1988 and
+23 March 1988.
+
+Binary Files (* denotes the official ACORN released version)
+============
+  FS3-124   - Assembler options DONGLE absent, Pseudo directory symbols No
+  FS3-124d  - Assembler options DONGLE present, Pseudo directory symbols No 
+  FS3-124p  - Assembler options DONGLE absent, Pseudo directory symbols Yes
+* FS3-124dp - Assembler options DONGLE present, Pseudo directory symbols Yes
+
+
+Comments
+========
+This code has been created using the v1.31 source code. Within that code there
+are options for Lang English/Italian (added Feb 1987) and the Pseudo directory 
+symbols (%, &, @). Pseudo directory symbols were definately available in v1.24, 
+but as the comment for the switch option is dated 1988, it is possible that it 
+was hard coded and later modified to be an option at assembly time. The switch 
+has been left in.
+
+Changes (from v1.06)
+====================
+Numerous changes were made. Not all are detailed here as there are so many.
+Leap year calculation.
+It is thought that sometime before this version compatibility has been added
+for AUN.
+Protection now set at &3F for a service system instead of &FF
+Pseudo directory symbols (%, &, @)
+
+
+-------------------------------------------------------------------------------
+
 Version 1.07
 ============
 

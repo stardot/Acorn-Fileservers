@@ -12,26 +12,25 @@
 ;Entry: BPTR is offset of buffer in RXBUF
 ;QPTR is offset of control block in RXCBV
 
-GETBYT JSR STKUSE ;Put user info ptr on stack
- BNE GTBYTZ
+GETBYT ROUT
+ JSR STKUSE ;Put user info ptr on stack
+ BNE #10
 
  LDX BPTR
- LDAAX RXBUF + 2 ;Get file handle
+ LDAAX RXBUF+2 ;Get file handle
  LDYIM ARGD
  STAIY NEWARG
 
  LDX QPTR ;Get seq no. from control block
  LDAAX RXCBV
- ANDIM  1 ;Mask out reception flag
+ ANDIM 1 ;Mask out reception flag
  INY
  STAIY NEWARG
-
- LDAIM  7 ;RNDMAN.RDCH
- LDYIM ARGA
- STAIY NEWARG
-
+ 
+ LDAIM 7 ;RNDMAN.RDCH
+ JSR SETRTN
  JSR RNDMAN ;*** Call RNDMAN.RDCH **
- BNE GTBYTX ;Failed
+ BNE #20 ;Failed
 
  LDYIM ARGB
  LDAIY NEWARG ;Get byte read
@@ -39,24 +38,16 @@ GETBYT JSR STKUSE ;Put user info ptr on stack
 
  INY
  LDAIY NEWARG ;Get EOF flag
- STA MIDTX + 1 ;Put in TX buffer
- LDAIM TXHDR + 2 ;Message length
+ STA MIDTX+1 ;Put in TX buffer
+ LDAIM TXHDR+2 ;Message length
 
 ;Note that sequence no. is still in control block
 
  JSR REPLYC ;Send reply
 
-GTBYTZ JMP COMRTS ;exit
+10 JMP COMRTS ;exit
 
-GTBYTX
- [ 1=0
- JSR EXTERR ;Abort
- JMP GTBYTZ
- |
- JMP ERROR
- ]
-
-
+20 JMP ERROR
 
 ;**********
 ;* PUTBYT *
@@ -68,36 +59,35 @@ GTBYTX
 ;Entry: BPTR is offset of buffer in RXBUF
 ;QPTR is offset of control block in RXCBV
 
-PUTBYT JSR STKUSE ;Put user info ptr on stack
- BNE PTBYTZ
+PUTBYT ROUT
+ JSR STKUSE ;Put user info ptr on stack
+ BNE #10
 
  LDX BPTR
- LDAAX RXBUF + 2 ;Get file handle
+ LDAAX RXBUF+2 ;Get file handle
  LDYIM ARGD
  STAIY NEWARG
 
  LDX QPTR ;Get seq no. from control block
  LDAAX RXCBV
- ANDIM  1 ;Mask out reception flag
+ ANDIM 1 ;Mask out reception flag
  INY
  STAIY NEWARG
 
  LDX BPTR
- LDAAX RXBUF + 3 ;Get byte to be written
+ LDAAX RXBUF+3 ;Get byte to be written
  INY
  STAIY NEWARG ;Put on call stack
 
- LDAIM  8 ;RNDMAN.WRCH
- LDYIM ARGA
- STAIY NEWARG
-
+ LDAIM 8 ;RNDMAN.WRCH
+ JSR SETRTN
  JSR RNDMAN ;*** Call RNDMAN.WRCH **
 
 ;Note that sequence no. is still in control block
 
  JSR RCODE ;Send return code
 
-PTBYTZ JMP COMRTS ;exit
+10 JMP COMRTS ;exit
 
 
 
@@ -107,23 +97,19 @@ PTBYTZ JMP COMRTS ;exit
 
 ;Most work done in RNDMAN.
 
-CPRDAR JSR GETUSE ;USTPTR := USERTB entry
- BEQ CPRDAA ;OK, continue
- JMP CPRDAX
-
-CPRDAB JMP ERROR
-
-CPRDAA JSR SETUSR ;Copy user info to NEWARG stack
+CPRDAR ROUT
+ JSR GETUSE ;USTPTR := USERTB entry
+ BNE #60
+ JSR SETUSR ;Copy user info to NEWARG stack
  LDX BPTR ;Offset of request buffer
  LDAAX MIDRX ;Get handle
  LDYIM ARGD
  STAIY NEWARG ;Put handle on NEWARG stack
 
  LDAIM &B ;RNDMAN.RDAR
- LDYIM ARGA
- STAIY NEWARG
+ JSR SETRTN
  JSR RNDMAN ;*** Call RNDMAN.RDAR **
- BNE CPRDAB ;Not OK, send error code and exit
+ BNE #40 ;Not OK, send error code and exit
 
 ;Have now got sequential file ptr, file hwm,
 ;and file size on NEWARG stack.
@@ -134,46 +120,44 @@ CPRDAA JSR SETUSR ;Copy user info to NEWARG stack
 ;Set Y to appropriate offset on NEWARG stack
 
  LDX BPTR ;Offset of request buffer
- LDAAX MIDRX + 1 ;Arg from request
-
- CMPIM  0 ;Test arg
- BNE CPRDAC ;Not 0
+ LDAAX MIDRX+1 ;Arg from request
+ BNE #10 ;Not 0
 
  LDYIM ARGB ;Offset of file ptr
- BNE CPRDAF ;Always jumps
+ BNE #50
 
-CPRDAC CMPIM  1 ;Test arg
- BNE CPRDAD ;Not 0 or 1
+10 CMPIM 1 ;Test arg
+ BNE #20 ;Not 0 or 1
 
  LDYIM ARGE ;Offset of file HWM
- BNE CPRDAF ;Always jumps
+ BNE #50
 
-CPRDAD CMPIM  2 ;Test arg
- BNE CPRDAE ;Not 0, 2, or 1
+20 CMPIM 2 ;Test arg
+ BNE #30 ;Not 0, 2, or 1
 
  LDYIM ARGH ;Offset of file size
- BNE CPRDAF ;Always jumps
+ BNE #50
 
 ;Invalid arg in request
 
-CPRDAE LDAIM ARGERR ;"Bad arg to RDAR"
- JMP CPRDAB ;Send error and exit
+30 LDAIM ARGERR ;"Bad arg to RDAR"
+40 JMP ERROR ;Send error and exit
 
 ;Y now contains the offset on NEWARG
 ;of the required 3 bytes.
 
-CPRDAF LDAIY NEWARG ;LS byte
+50 LDAIY NEWARG ;LS byte
  STA MIDTX ;Put in TX buffer
  INY
  LDAIY NEWARG ;CS byte
- STA MIDTX + 1
+ STA MIDTX+1
  INY
  LDAIY NEWARG ;MS byte
- STA MIDTX + 2
- LDAIM TXHDR + 3 ;Mesage length
+ STA MIDTX+2
+ LDAIM TXHDR+3 ;Mesage length
  JSR REPLYC ;Send reply
 
-CPRDAX JMP COMRTS ;Exit
+60 JMP COMRTS ;Exit
 
 
 
@@ -181,12 +165,10 @@ CPRDAX JMP COMRTS ;Exit
 
 ;Set sequential file pointer
 
-CPSTAR JSR GETUSE ;USTPTR := ptr to user info
- BEQ CPSTAA ;OK, continue
-
- JMP CPRDAX ;exit
-
-CPSTAA JSR SETUSR ;Copy user info to stack
+CPSTAR ROUT
+ JSR GETUSE ;USTPTR := ptr to user info
+ BNE #10 ;error
+ JSR SETUSR ;Copy user info to stack
  LDX BPTR ;Offset of request buffer
  LDAAX MIDRX ;Get handle
  LDYIM ARGD
@@ -194,32 +176,31 @@ CPSTAA JSR SETUSR ;Copy user info to stack
 
 ;Put arg saying what to set on stack
 
- LDAAX MIDRX + 1
+ LDAAX MIDRX+1
  INY
  STAIY NEWARG
 
 ;Put value to be set on stack
 
- LDAAX MIDRX + 2 ;value (LS)
+ LDAAX MIDRX+2 ;value (LS)
  INY
  STAIY NEWARG
- LDAAX MIDRX + 3 ;value (CS)
+ LDAAX MIDRX+3 ;value (CS)
  INY
  STAIY NEWARG
- LDAAX MIDRX + 4 ;value (MS)
+ LDAAX MIDRX+4 ;value (MS)
  INY
  STAIY NEWARG
- LDAAX MIDRX + 5 ;Some vals have 4 bytes
+ LDAAX MIDRX+5 ;Some vals have 4 bytes
  INY
  STAIY NEWARG
 
  LDAIM &C ;RNDMAN.STAR
- LDYIM ARGA
- STAIY NEWARG
+ JSR SETRTN
  JSR RNDMAN ;*** Call RNDMAN.STAR **
  JSR RCODE ;Transmit reply
 
- JMP COMRTS ;Exit
+10 JMP COMRTS ;Exit
 
 
 
@@ -245,43 +226,42 @@ CPSTAA JSR SETUSR ;Copy user info to stack
 ;Entry: BPTR is offset of buffer in RXBUF
 ;QPTR is offset of control block in RXCBV
 
-PBYTES JSR GETUSE ;USTPTR := ptr to user info
- BNE PBYTEK ;not logged on ** 6/9/84 **
+PBYTES ROUT
+ JSR GETUSE ;USTPTR := ptr to user info
+ BNE #10 ;not logged on ** 6/9/84 **
 
  JSR RMSUBO ;Prepare for some PUTBYTES calls
- BEQ PBYTEJ
+ BEQ #15
 
-PBYTEC JSR EXTERR ;Not OK, send RC
-PBYTEK JMP PBYTEZ ;Exit
+05 JSR EXTERR ;Not OK, send RC
+10 JMP COMRTS ;Exit
 
 ;Send first reply, giving data port and max blocksize
 
-PBYTEJ LDAIM PSAVD ;Use same data port as SAVE
+15 LDAIM PSAVD ;Use same data port as SAVE
  STA MIDTX
 
- LDAIM BUFSZ ;Big buffer size (2 bytes)
- STA MIDTX + 1
- LDAIM /BUFSZ
- STA MIDTX + 2
+ LDAIM :LSB:BUFSZ ;Big buffer size (2 bytes)
+ STA MIDTX+1
+ LDAIM :MSB:BUFSZ
+ STA MIDTX+2
 
- LDAIM  0 ;RTCODE := CCODE := 0
- STA RTCODE
+ LDAIM 0
+ STA RTCODE ;RTCODE := CCODE := 0
  STA CCODE
 
- LDAIM TXHDR + 3 ;Message length
+ LDAIM TXHDR+3 ;Message length
 
  JSR REPLY ;Send message
- BEQ PBYTEB ;OK, continue
-
- JMP PBYTEZ ;Lost contact - abort
+ BNE #10 ;Lost contact - abort
 
 ;Ready to receive data, so set up for
 ;reception loop.
 
-PBYTEB LDAIM  0 ;DATAIN := 0 (3 bytes)
- STA DATAIN
- STA DATAIN + 1
- STA DATAIN + 2
+ LDAIM 0
+ STA DATAIN ;DATAIN := 0 (3 bytes)
+ STA DATAIN+1
+ STA DATAIN+2 
  STA DSCERR ;Clear disc err flag
  STA FINFLG ;Clear end-of-transfer flag
 
@@ -290,27 +270,25 @@ PBYTEB LDAIM  0 ;DATAIN := 0 (3 bytes)
 ;set up! Jump straight to final reply.
 
  LDX BPTR
- LDAAX MIDRX + 2 ;Ls byte of size
- ORAAX MIDRX + 3 ;CS
- ORAAX MIDRX + 4 ;MS
- BNE PBLOOP ;Not zero bytes
- JMP PBYTED ;Jump straight to final reply
+ LDAAX MIDRX+2 ;Ls byte of size
+ ORAAX MIDRX+3 ;CS
+ ORAAX MIDRX+4 ;MS
+ BNE #20 ;Not zero bytes
+ JMP #70 ;Jump straight to final reply
 
-PBLOOP
 ;Loop which receives data and writes it to disc
-
 ;Set buffer pointers in RX control block
 
- LDY QPTR ;Buffer start = BBUF
+20 LDY QPTR ;Buffer start = BBUF
  LDA BBUF
  STAAY CBBUF
- LDA BBUF + 1
- STAAY CBBUF + 1
+ LDA BBUF+1
+ STAAY CBBUF+1
 
  LDA BBEND ;Buffer end = BBEND
  STAAY CBBUFE
- LDA BBEND + 1
- STAAY CBBUFE + 1
+ LDA BBEND+1
+ STAAY CBBUFE+1
 
  LDAIM PSAVD ;Set data port
  STAAY CBPORT
@@ -318,21 +296,19 @@ PBLOOP
 ;Station already set from first reception
 
  JSR WAIT ;Wait for reception
- BEQ PBLOOA ;OK, continue
-
- JMP PBYTEZ ;No contact => abort
+ BNE #10 ;No contact => abort
 
 ;Now subtract buffer limits to see how
 ;much data was received.
 
-PBLOOA LDY QPTR
+ LDY QPTR
  SEC  ;COWORK := CBBUFE-CBBUF
  LDAAY CBBUFE
  SBCAY CBBUF
  STA COWORK ;LS byte
- LDAAY CBBUFE + 1
- SBCAY CBBUF + 1
- STA COWORK + 1 ;MS byte
+ LDAAY CBBUFE+1
+ SBCAY CBBUF+1
+ STA COWORK+1 ;MS byte
 
 ;Add amount received to total number of bytes
 ;received.
@@ -341,12 +317,12 @@ PBLOOA LDY QPTR
  LDA COWORK ;LS byte
  ADC DATAIN
  STA DATAIN
- LDA COWORK + 1 ;CS byte
- ADC DATAIN + 1
- STA DATAIN + 1
- LDAIM  0 ;MS byte of received length always 0
- ADC DATAIN + 2
- STA DATAIN + 2
+ LDA COWORK+1 ;CS byte
+ ADC DATAIN+1
+ STA DATAIN+1
+ BCC #25 ;MS byte of received length always 0
+ INC DATAIN+2
+25
 
 ;Compare total amount received (in DATAIN)
 ;with total number of bytes to be written.
@@ -358,36 +334,36 @@ PBLOOA LDY QPTR
 
  LDX BPTR
  SEC
- LDAAX MIDRX + 2 ;LS byte of size
+ LDAAX MIDRX+2 ;LS byte of size
  SBC DATAIN
  STA BREGA ;Use BREGA as workspace
- LDAAX MIDRX + 3 ;CS byte of size
- SBC DATAIN + 1
- STA BREGA + 1
- LDAAX MIDRX + 4 ;MS byte
- SBC DATAIN + 2
+ LDAAX MIDRX+3 ;CS byte of size
+ SBC DATAIN+1
+ STA BREGA+1
+ LDAAX MIDRX+4 ;MS byte
+ SBC DATAIN+2
 
 ;Carry set if received <= size
 
  ORA BREGA ;OR 3 bytes of result
- ORA BREGA + 1 ;for zero test
- BEQ PBLOOC ;Equal => last block
- BCS PBLOOD ;Recd < size => carry on
+ ORA BREGA+1 ;for zero test
+ BEQ #30 ;Equal => last block
+ BCS #40 ;Recd < size => carry on
 
 ;Client sent too much data.
 ;Send error code and stop.
 
  LDAIM PBERRA ;Error code
- JMP PBYTEC ;Send RC and exit
+ JMP #05 ;Send RC and exit
 
-PBLOOC LDAIM &FF ;Last block; set FINFLG
+30 LDAIM &FF ;Last block; set FINFLG
  STA FINFLG
 
 ;If disc error flag set, ignore received data,
 ;and jump round disc write.
 
-PBLOOD LDA DSCERR ;Disc error flag
- BNE PBLOOE ;Jump if error
+40 LDA DSCERR ;Disc error flag
+ BNE #50 ;Jump if error
 
 ;Set up for call of RNDMAN
 
@@ -400,70 +376,65 @@ PBLOOD LDA DSCERR ;Disc error flag
  LDA BBUF ;Buffer addr (Big Buffer)
  INY
  STAIY NEWARG
- LDA BBUF + 1
+ LDA BBUF+1
  INY
  STAIY NEWARG
 
  LDA COWORK ;No. of bytes (calculated above)
  INY
  STAIY NEWARG ;LS byte
- LDA COWORK + 1
+ LDA COWORK+1
  INY
  STAIY NEWARG ;MS byte
 
  LDAIM &A ;RNDMAN.PUTBYTES
- LDYIM ARGA
- STAIY NEWARG
-
- JSR SETUSE ;Stack user info
+ JSR SETUSA ;Stack user info
 
  JSR RNDMAN ;*** RNDMAN.PUTBYTES **
- BEQ PBLOOE ;OK, continue
+ BEQ #50 ;OK, continue
  STA DSCERR ;Store error code
 
 ;If FINFLG is set, then we have just written
 ;the last block.
 ;Otherwise, adjust the file offset and carry on.
 
-PBLOOE LDA FINFLG ;Finished?
- BNE PBYTED ;Exit from loop if yes
+50 LDA FINFLG ;Finished?
+ BNE #70 ;Exit from loop if yes
 
 ;Send ack to client's ack port
 
  LDY BPTR
  LDXAY CPUFD ;Ack port
- LDAIM  1 ;Message length
-
+ LDAIM 1 ;Message length
  JSR REPLYB ;Send byte (random contents)
- BNE PBYTEZ ;Contact lost => abort
+ BNE #80 ;Contact lost => abort
 
-PBLOOF JMP PBLOOP ;Round loop again
+60 JMP #20 ;Round loop again
 
-PBYTED
 ;Have received all the data.
 ;Final RC is in DSCERR.
 ;If RC is zero, send back amount xferred (always amount requested
 ;if no error). If non-zero, send error.
 
- LDA DSCERR
+70 LDA DSCERR
  STA RTCODE
- BNE PBYTEX ;RC <> 0 => error
+ BNE #90 ;RC <> 0 => error
  STA CCODE ;Set command code = 0
  STA MIDTX+4 ;send 32 bit number
  LDX BPTR
- LDAAX MIDRX + 2
- STA MIDTX + 1
- LDAAX MIDRX + 3
- STA MIDTX + 2
- LDAAX MIDRX + 4 ;Move length of data to MIDTX
- STA MIDTX + 3
- LDAIM TXHDR + 5
+ LDAAX MIDRX+2
+ STA MIDTX+1
+ LDAAX MIDRX+3
+ STA MIDTX+2
+ LDAAX MIDRX+4 ;Move length of data to MIDTX
+ STA MIDTX+3
+ LDAIM TXHDR+5
  JSR REPLYC ;Send reply (note MIDTX undefined)
 
-PBYTEZ JMP COMRTS ;Exit from command
+80 JMP COMRTS ;Exit from command
 
-PBYTEX JSR RCODE ;Send error reply
- JMP PBYTEZ
+90 JSR RCODE ;Send error reply
+ JMP #80
 
 
 
@@ -488,33 +459,34 @@ PBYTEX JSR RCODE ;Send error reply
 ;Entry: BPTR is offset of buffer in RXBUF
 ;QPTR is offset of control block in RXCBV
 
-GBYTES LDAIM  0
+GBYTES ROUT
+ LDAIM 0
  STA GBBXFD ;GBBXFD := 0
- STA GBBXFD + 1
- STA GBBXFD + 2
+ STA GBBXFD+1
+ STA GBBXFD+2
  STA GBEFLG ;GBEFLG := 0
 
  JSR GETUSE ;USTPTR := ptr to user info
- BNE GBYTEC ;OK, continue ** 6/9/84 **
+ BNE #10 ;OK, continue ** 6/9/84 **
 
  JSR RMSUBO ;Set up RNDMAN for GETBYTES calls
- BEQ GBYTEF
+ BEQ #15
 
-GBYTEG JSR EXTERR ;Not OK, send RC
-GBYTEC JMP GBYTEZ ;Exit
+05 JSR EXTERR ;Not OK, send RC
+10 JMP COMRTS ;Exit
 
-GBYTEF JSR RCODE ;Send "OK" rc
- BNE GBYTEC ;lost contect so ABORT
+15 JSR RCODE ;Send "OK" rc
+ BNE #10 ;lost contect so ABORT
 
 ;TOSEND := size of transfer
 
-GBYTED LDX BPTR
- LDAAX MIDRX + 2 ;Size (LS)
+20 LDX BPTR
+ LDAAX MIDRX+2 ;Size (LS)
  STA TOSEND
- LDAAX MIDRX + 3 ;Size (CS)
- STA TOSEND + 1
- LDAAX MIDRX + 4 ;Size (MS)
- STA TOSEND + 2
+ LDAAX MIDRX+3 ;Size (CS)
+ STA TOSEND+1
+ LDAAX MIDRX+4 ;Size (MS)
+ STA TOSEND+2
 
 ;Use the big buffer.
 ;Read from disc chunks of size BUFSZ, and transmit
@@ -525,7 +497,7 @@ GBYTED LDX BPTR
 ;It may be worth adding extra optimization here if
 ;very large (> BUFSZ) transfers are common.
 
- LDAIM  0
+ LDAIM 0
  STA DSCERR ;No disc error yet
  STA FINFLG ;Not finished yet
 
@@ -534,10 +506,10 @@ GBYTED LDX BPTR
 ;block being set up!
 
  LDA TOSEND ;Size (LS)
- ORA TOSEND + 1 ;CS
- ORA TOSEND + 2 ;MS
- BNE GBLOOP ;OK - not zero bytes
- JMP GBYTEB ;Jump straight to final reply
+ ORA TOSEND+1 ;CS
+ ORA TOSEND+2 ;MS
+ BNE #25 ;OK - not zero bytes
+ JMP #70 ;Jump straight to final reply
 
 
 ;Loop, sending data to client in blocks of
@@ -550,43 +522,42 @@ GBYTED LDX BPTR
 ;FINFLG gets set on the last time round
 ;the loop.
 
-GBLOOP SEC  ;COWORK := TOSEND - BUFSZ
+25 SEC  ;COWORK := TOSEND - BUFSZ
  LDA TOSEND
- SBCIM BUFSZ
+ SBCIM :LSB:BUFSZ
  STA COWORK
- LDA TOSEND + 1
- SBCIM /BUFSZ
- STA COWORK + 1
- LDA TOSEND + 2
- SBCIM  0 ;BUFSZ only 2 bytes
- STA COWORK + 2
+ LDA TOSEND+1
+ SBCIM :MSB:BUFSZ
+ STA COWORK+1
+ LDA TOSEND+2
+ SBCIM 0
+ STA COWORK+2
 
  ORA COWORK ;OR 3 bytes for zero test
- ORA COWORK + 1
- BEQ GBLOOA ;TOSEND = BUFSZ
- BCS GBLOOB ;TOSEND < BUFSZ
+ ORA COWORK+1
+ BEQ #30 ;TOSEND = BUFSZ
+ BCS #35 ;TOSEND < BUFSZ
 
 ;BUFSZ >= TOSEND: send remaining data
 ;and set finish flag.
 
-GBLOOA LDA TOSEND ;OUTBSZ := TOSEND
+30 LDA TOSEND ;OUTBSZ := TOSEND
  STA OUTBSZ
- LDA TOSEND + 1
- STA OUTBSZ + 1
+ LDA TOSEND+1
+ STA OUTBSZ+1
  DEC FINFLG ;Set loop finish flag to $FF
- JMP GBLOOC
+ BNE #40
 
-GBLOOB LDAIM BUFSZ ;OUTBSZ := BUFSZ
+35 LDAIM :LSB:BUFSZ ;OUTBSZ := BUFSZ
  STA OUTBSZ
- LDAIM /BUFSZ
- STA OUTBSZ + 1
+ LDAIM :MSB:BUFSZ
+ STA OUTBSZ+1
 
-GBLOOC
 ;The size of the block to send is in OUTBSZ.
 ;Call RNDMAN.GETBYTES to get the data into
 ;the big buffer.
 
- LDX BPTR
+40 LDX BPTR
  LDAAX MIDRX ;Get file handle
  LDYIM ARGD
  STAIY NEWARG ;Put handle on stack
@@ -606,65 +577,69 @@ GBLOOC
  STAIY NEWARG
 
  LDAIM  9 ;RNDMAN.GETBYTES
- LDYIM ARGA
- STAIY NEWARG
-
- JSR SETUSE
+ JSR SETUSA
 
  JSR RNDMAN ;*** Call RNDMAN.GETBYTES **
- BEQ GBLOOD ;OK, continue
+ BEQ #50 ;OK, continue
  STA DSCERR ;Otherwise set error code
-
-GBLOOD
 
 ;Add number of bytes actually read to
 ;GBBXFD, and OR end-of-file flag
 ;into GBEFLG.
 
- CLC
+50 CLC
  LDYIM ARGB
  LDAIY NEWARG ;Bytes xferred (LS)
  ADC GBBXFD
  STA GBBXFD ;LS total
  INY
  LDAIY NEWARG
- ADC GBBXFD + 1
- STA GBBXFD + 1 ;CS total
- LDAIM  0 ;Only 2 bytes from RNDMAN
- ADC GBBXFD + 2
- STA GBBXFD + 2 ;MS total
-
- INY
+ ADC GBBXFD+1
+ STA GBBXFD+1 ;CS total
+ BCC #60 ;Only 2 bytes from RNDMAN
+ INC GBBXFD+2 ;MS total
+60 INY
  LDAIY NEWARG ;EOF flag
  ORA GBEFLG ;OR with flag so far
  STA GBEFLG
 
  LDY BPTR
+ [ 1=0
+ LDAAY RXBUF+1 ;**23/3/88** GETBYTES or GETPUTBYTES
+ EORIM 35
+ BNE #65
+ LDA DSCERR
+ BNE #67
+ LDAAY MIDRX+1
+ LDXIM &A ;**23/3/88** RNDMAN.PUTBYTES
+ JSR RMSUBR
+ JMP #67
+
+65
+ ]
  LDAAY CPUFD ;Get client's data port
  JSR SENDBB ;Send big block (size in OUTBSZ)
- BEQ GBLOOE ;OK, continue
- JMP GBYTEZ ;Contact lost with client; give up
+ BNE #90 ;Contact lost with client; give up
 
-GBLOOE
 ;End of loop. Test finish flag, and set
 ;TOSEND from COWORK.
 
- BIT FINFLG ;Test finish flag
- BMI GBYTEB ;Exit from loop if finished
+67 BIT FINFLG ;Test finish flag
+ BMI #70 ;Exit from loop if finished
 
  LDA COWORK ;TOSEND := COWORK
  STA TOSEND
- LDA COWORK + 1
- STA TOSEND + 1
- LDA COWORK + 2
- STA TOSEND + 2
+ LDA COWORK+1
+ STA TOSEND+1
+ LDA COWORK+2
+ STA TOSEND+2
 
- JMP GBLOOP ;Loop return
+ JMP #25 ;Loop return
 
 ;Exit from GBLOOP: RC in DSCERR
 
-GBYTEB LDA DSCERR
- BNE GBYTEE ;Jump if error
+70 LDA DSCERR
+ BNE #80 ;Jump if error
 
 ;Send back end-of-file flag and
 ;count of bytes actually read.
@@ -672,37 +647,35 @@ GBYTEB LDA DSCERR
  LDA GBEFLG ;EOF flag
  STA MIDTX ;Put in TX buffer
  LDA GBBXFD ;Bytes xferred (LS)
- STA MIDTX + 1
- LDA GBBXFD + 1
- STA MIDTX + 2 ;CS
- LDA GBBXFD + 2
- STA MIDTX + 3 ;MS
+ STA MIDTX+1
+ LDA GBBXFD+1
+ STA MIDTX+2 ;CS
+ LDA GBBXFD+2
+ STA MIDTX+3 ;MS
  LDAIM 0
  STA MIDTX+4 ;send 32 bit number ** 26/2/85 **
- LDAIM TXHDR + 5 ;Message length
- JSR REPLYC ;Send reply
- JMP GBYTEZ ;Exit from command
+ LDAIM TXHDR+5 ;Message length
+ JMP Datout ;Send reply
 
-GBYTEE JSR RCODE ;Send return code
+80 JSR RCODE ;Send return code
 
-GBYTEZ JMP COMRTS ;Exit from command
+90 JMP COMRTS ;Exit from command
 
 
 
 ;*** Call RNDMAN to set up bytes operation
 
-RMSUBO LDYIM ARGA
+RMSUBO ROUT
  LDAIM &E ;**** RNDMAN.SUBO ***
- STAIY NEWARG
- JSR SETUSE
+ JSR SETUSA
  LDX BPTR
- LDAAX MIDRX + 0 ;Get file handle
- INY
+ LDAAX MIDRX+0 ;Get file handle
+RMSUBP INY
  STAIY NEWARG
 
  LDX QPTR ;Get seq no from control block
  LDAAX RXCBV
- ANDIM  1 ;Get just seq bit
+ ANDIM 1 ;Get just seq bit
  INY
  STAIY NEWARG
 
@@ -710,22 +683,22 @@ RMSUBO LDYIM ARGA
 ;are in the correct order in rx block
 
  LDX BPTR
-RMSUBA LDAAX MIDRX + 1
+10 LDAAX MIDRX+1
  INY
  STAIY NEWARG
  INX
  CPYIM ARGL
- BNE RMSUBA ;More to copy
+ BNE #10 ;More to copy
 
  JMP RNDMAN ;**** Call RNDMAN.SUBO & return ***
 
-CPWHO ROUT ;** 19/3/85 **
 
 ;Yet another interface - this one allows an application
 ;to determine the userid under which it is logged-on
 
 ;This is probably most useful for MAILing type progs
 
+CPWHO ROUT ;** 19/3/85 **
  JSR GETUSE
  BNE #20 ;nb this will deal with the error
 
@@ -739,13 +712,8 @@ CPWHO ROUT ;** 19/3/85 **
  BNE #10
 
  TXA
- CLC
- ADCIM TXHDR ; Add TX header length *** LH 28/8/85 ***
- [ 1=1
- JMP DATOUT
- |
- JSR REPLYC ;return the answer with zero RC
- ]
+ JMP Datous ;return the answer with zero RC
+
 20 JMP COMRTS
- 
+
  LNK UADE20
