@@ -243,6 +243,22 @@ EXPLLD PLA
  BEQ EXPLLG ;EQ => REMOVE ALL BLOCKS
  JSR TSTMRK ;NZ => REMOVE DIRTY BLOCKS ONLY
  BEQ EXPLLF ;NOT DIRTY, GO TO NEXT BLOCK
+ [ VERLB>="2"                          
+    ; Age entries on ensure : remove entries on destroy
+ JSR ENSURE ; ensure dirty entry
+ PHA
+ LDYIM CEAGE                          
+ LDAIM &80
+ STAIY CRNT ; Age entry
+ PLA
+ BNE EXPLLX ; Detect disc errors
+ BEQ EXPLLF ; Step to next block because non removed.
+
+EXPLLG JSR ENSURE ;ENSURE ITS UPTO DATE ON DISC
+ JSR REMVIT ; Destroy file so remove all.
+ BNE EXPLLX ; Detect disc errors.          
+
+ | ; old code pre 1.02 does not destroy cache entries
 EXPLLG JSR ENSURE
   [ 1=1 
  LDYIM CEAGE ; AGE ENTRY DRAMATICALLY LH 3/12/85
@@ -253,6 +269,7 @@ EXPLLG JSR ENSURE
  |
  JSR REMVIT ;REMOVE IT FROM CACHE & PLACE ON FREE CHAIN
  BNE EXPLLX ;skip if disc error
+ ]
  ]
 
  LDYIM CENEXT ; REMVIT shuffles blocks down so process new current.
