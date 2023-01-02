@@ -57,7 +57,7 @@ DONGLE * 0 ;Real Time Clock present(=0) absent(=1)
 
 
 VERLA * "0"
-VERLB * "3"
+VERLB * "4"
 DEBUG *  0 ;Make this +ve for debug letters
 MASK * &FF ;protection state
 

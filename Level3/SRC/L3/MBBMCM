@@ -149,7 +149,9 @@ GTSR1 LDYIM CAFLG
  JMP GTBGT
 GTBND1 TAX ; preserve error
  PLA       ; restore stack LH 17/1/86 ***
+ STA GNCBPT + 1
  PLA
+ STA GNCBPT
  TXA
 GTBND RTS
 ;

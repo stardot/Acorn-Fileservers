@@ -751,12 +751,12 @@ LHDSCR PHA
  LDYIM /(DSCCB )
  JSR OSWORD
  JSR VSTRIN
- = "       : Disc Error. "
+ = "Disc Error N0. "
  NOP
  LDA DSCCB+3
  JSR WHEX
  JSR VSTRIN
- = " At "
+ = " At Disc Address "
  NOP
  LDA DSCCB+2
  JSR WHEX

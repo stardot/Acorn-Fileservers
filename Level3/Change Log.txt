@@ -1,3 +1,39 @@
+Version 1.04
+============
+
+Date - estimated sometime after June 1986. no dated comments after June 1986
+
+Binary Files (* denotes the official ACORN released version)
+============
+  FS3-104  - Assembler options: DONGLE=1 (absent)
+* FS3-104d - Assembler options: DONGLE=0 (present)
+
+Comments
+========
+
+Changes (from v1.03)
+====================
+
+HEADER FILE 1
+         Uade01 Line 0060 VERLB, version changed from 3 to 4
+
+MAPMAN
+         Uade10 Line 0300 JSR FNDMAP added to check before changing size of a chain
+                          on disc
+         Uade10 Line 0322 BCS branch added
+
+MAP BLOCK AND BIT MAP MANAGEMENT
+         MBBMCM Line 0152 bugfix: Update the cache block descriptor after 
+                          getting a block to store
+
+DSCMAN
+         Uade14 Line 0754 changed disc error reporting text 
+                     0754 "       : Disc Error. " to "Disc Error N0. "
+         Uade14 Line 0759 " At " to " At Disc Address "    
+
+
+-------------------------------------------------------------------------------
+
 Version 1.03
 ============
 

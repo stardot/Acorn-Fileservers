@@ -1,4 +1,4 @@
-Level 3 File Server v1.03
+Level 3 File Server v1.04
 =========================
 
 This disc contains a recreation of the source code for the Acorn Level 3 
@@ -39,26 +39,30 @@ Files
   Location for the assembled parts. Do not delete or the assembler will fail.
 
 
-Version 1.03
+Version 1.04
 ============
 
-Date - estimated about June 1986. Last comment was 5/6/86
+Date - estimated sometime after June 1986. no dated comments after June 1986
 
 Comments
 ========
-A reference is made in file STRMAN to code from v1.02.
 
-Changes (from v1.01)
+Changes (from v1.03)
 ====================
 
 HEADER FILE 1
-         Uade01 Line 0060 VERLB, version changed from 1 to 3
+         Uade01 Line 0060 VERLB, version changed from 3 to 4
 
-STRMAN
-         Uade0B Line 0246 bugfix: introduced at v1.02. When removing objects
-                          from the disc, age the entries on ensure and remove
-                          them on destroy from cache
+MAPMAN
+         Uade10 Line 0300 JSR FNDMAP added to check before changing size of a chain
+                          on disc
+         Uade10 Line 0322 BCS branch added
+
+MAP BLOCK AND BIT MAP MANAGEMENT
+         MBBMCM Line 0152 bugfix: Update the cache block descriptor after 
+                          getting a block to store
 
 DSCMAN
-05/06/86 Uade14 Line 0743-0789 Report disk errors to screen
-
+         Uade14 Line 0754 changed disc error reporting text 
+                     0754 "       : Disc Error. " to "Disc Error N0. "
+                     0759 " At " to " At Disc Address "    
