@@ -1,0 +1,341 @@
+ OPT UADE20 ;FILE > Uade20
+ TTL File server file UADE20
+
+
+;C O M M A N D  P R O C E S S O R
+
+;U T I L I T I E S
+
+
+RCODE ROUT
+
+;Check return code in A. If 0, send
+;3 byte message. If not, go to error
+;routine
+;Command code always set 0.
+
+ STZ CCODE
+ TAY
+ BEQ REPLYA
+ JMP EXTERR
+
+
+;Sends a zero return code to client.
+;Sets RC into TXBUF and drops through into
+;REPLY, passing a the header length as message length
+
+REPLYA LDAIM TXHDR
+REPLYC STZ RTCODE ;Set R.code
+
+;Sends a message of length A to client
+;on the reply port (in var RPLYPT).
+
+REPLY LDX RPLYPT
+
+;Sends a message of length A on port X
+;to client.
+
+REPLYB LDY QPTR ;Get CB pointer
+ CLC
+ ADCIM :LSB:TXBUF
+ STAAY CBBUFE ;Buffer end ptr. (lo)
+ LDAIM  0 ;Assumed msg. length < 255
+
+ STAAY CBBUF+2
+ STAAY CBBUF+3 ;hi order addresses
+ STAAY CBBUFE+2
+ STAAY CBBUFE+3 ;from 2nd processor
+
+ ADCIM :MSB:TXBUF
+ STAAY CBBUFE+1 ;Buffer end ptr (hi)
+
+ LDAIM :LSB:TXBUF
+ STAAY CBBUF ;Buffer ptr lo
+ LDAIM :MSB:TXBUF
+ STAAY CBBUF+1 ;Buffer ptr hi
+ TXA  ;Set port
+ STAAY CBPORT
+
+
+;Entry point used when CB set up elsewhere
+;(e.g. LOAD/EXAMINE). Assumed all is
+;set but TX flag.
+
+SEND ROUT
+ LDAIM TXFLAG
+ ORAAY CBFLG
+ STAAY CBFLG
+
+ LDAIM TXRPT
+ LDYIM TXDLY ;Delay between tries
+
+;A = no. of times to try transmit
+;Y = delay between tries
+;NETCB = page zero pointer to control block
+
+ STA TXJ
+ STY TXD
+ LDAI NETCB
+ STA TXF ;flag byte
+10 LDX NETCB ;Pointers to CBlock
+ LDY NETCB+1
+ LDAIM &10
+ JSR OSWORD ;call Tx
+
+ LDAI NETCB ;check for Tx on Tx
+ BNE #20
+ LDA TXF
+ STAI NETCB
+ BRA #10 ;restore flag byte and try again
+
+20 LDAIM 50
+ JSR OSBYTE
+ TXA
+ BMI #20 ;poll 'til done
+ BEQ #40 ;Yes => success => exit
+ DEC TXJ ;No. of times decrement
+ BEQ #30 ;All done => failure
+ LDY TXD ;Delay time
+ JSR MSDELY ;Do delay
+ BRA #10 ;Do again
+
+30 TXA ;Return flag in A
+40 RTS
+
+
+;Wait to receive from client.
+;Control block pointed by QPTR, wait
+;is a constant (WAITCL) no. of msecs.
+
+WAIT ROUT
+ LDAIM RXFLAG
+ STA CBFLG ;CB is ammended for Rx, so open it
+
+ STZ RXCBN
+ LDAIM &11
+ LDXIM :LSB:RXCBN
+ LDYIM :MSB:RXCBN
+ JSR OSWORD
+
+ LDXIM 50
+ STX TIMER2
+ LDXIM WAITCL
+ STX TIMER1
+10 LDAIM ONEMS ;One msec loop
+ STA TIMER ;(2cycles)
+20 LDX RXCBN ;(4usecs)
+ LDAIM 51
+ JSR OSBYTE ;poll Rx
+ TXA
+ BMI #30 ;(2)
+ DEC TIMER ;(5) timer not p.0
+ BNE #20 ;(3)
+ DEC TIMER1  ;(2)
+ BNE #10 ;(3)
+ DEC TIMER2
+ BNE #10
+
+;Total inner loop time = 14 cycles
+;So ONEMS = 71 (decimal)
+
+30 LDXIM :LSB:RXCBN
+ LDYIM :MSB:RXCBN
+ LDAIM &11
+ JSR OSWORD ;read the control block
+
+ LDAIM 0
+ BIT RXCBN+1 ;read flag byte
+ BMI #40
+ LDAIM WAITER ;timeout
+
+40 RTS
+  
+
+ERROR ROUT
+ JSR EXTERR
+ JMP COMRTS
+
+
+;Puts error code in A into TXBUF +02.
+;Looks A up in ERRTAB and if found, puts text into
+;message.
+;If not found, uses text F.S. ERROR xx (xx is A
+;in hex).
+;Message then send to client using REPLY.
+;CCODE always set to zero in LOOKER
+
+EXTERR ROUT
+ PHA
+ JSR LOOKER ;Find error in table etc.
+ PLA ;** 17/9/84 **
+ CMPIM RDERRH
+ BNE #30           
+ LDA MCopat+1 ;Details of where object open
+ BEQ #10 ;net number
+
+ JSR #40 ;write into the buffer
+ LDAIM "."
+ STAAX MIDTX ;add separator
+ INX
+
+10 LDA MCopat ;station number
+ JSR #40 ;append to end of message
+ LDAIM "("
+ STAAX MIDTX ;lest job (task) number present
+ LDA MCopat+2
+ BEQ #20
+ INX
+ JSR #40 ;write into the buffer
+ LDAIM ")"
+ STAAX MIDTX
+ INX
+
+20 LDAIM CR
+ STAAX MIDTX
+
+30 TXA ;Message length for REPLY
+ SEC ;Set carry to add 1 for CR
+ ADCIM TXHDR ;Add header length to message length
+ JMP REPLY ;Send and return
+
+40 STX COTEMP
+ JSR MKDEC ;convert to decimal
+ LDYIM :LSB:-3
+ LDX COTEMP ;restore X value
+50 LDAAY COWORK-:LSB:-3 ;get results from MKDEC
+ CMPIM SPACE
+ BEQ #60
+ STAAX MIDTX ;put text in buffer
+ INX
+60 INY
+ BNE #50
+ RTS
+
+
+;Look error in A up and put relevant message
+;at MIDTX.
+
+LOOKER ROUT
+ STA RTCODE
+ PHA
+
+ LDAIM :LSB:ERRTAB
+ STA GENPTR
+ LDAIM :MSB:ERRTAB
+ STA GENPTR+1
+ LDYIM 0
+ STY CCODE ;Set command code to zero
+10 PLA
+ CMPIY GENPTR ;Check error number
+ BEQ #60 ;Found
+
+ PHA
+ LDAIM CR
+20 INY
+ BNE #30
+ INC GENPTR+1
+30 CMPIY GENPTR ;Move to end of this text
+ BNE #20
+ INY
+ BNE #40
+ INC GENPTR+1
+40 LDAIY GENPTR
+ BNE #10 ;Non-zero => not end of table
+
+;If here, number not found, so construct
+;default error message.
+
+ LDXIM 0
+45 LDAAX ERRMSG ;Load error text
+ BMI #50 ;Terminated by NOP
+ STAAX MIDTX ;Store in transmit buffer
+ INX
+ BNE #45
+
+50 PLA  ;Get error number back
+ JSR WRTERR ;Put A in hex in message at X
+ LDAIM CR
+ STAAX MIDTX ;Terminate message
+ RTS
+
+60 LDXIM &FF ;Error found, move text to message
+65 INX
+ INY
+ BNE #70
+ INC GENPTR+1
+70 LDAIY GENPTR
+ STAAX MIDTX
+ CMPIM CR
+ BNE #65
+ RTS  ;Complete, exit X - length-1
+
+
+WRTERR ROUT
+ PHA
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ JSR #10 ;TOP NIBBLE
+ PLA
+10 ANDIM &F
+ CMPIM &A
+ BCC #20
+ ADCIM 6
+20 ADCIM &30
+ STAAX MIDTX
+ INX
+ RTS
+
+
+ [ Lang = English
+ERRMSG = "F.S. Error "
+ ]
+ [ Lang = Italian
+ERRMSG = "Errore mefile "
+ ]
+ NOP
+
+
+;Send big block on port in A.
+;Size of message is in OUTBSZ,
+;assumes station already set.
+
+SENDBB ROUT
+SENDBC LDY QPTR
+ STAAY CBPORT
+ CLC
+ LDA BBUF ;Buffer address
+ STAAY CBBUF
+ ADC OUTBSZ
+ STAAY CBBUFE
+ LDA BBUF+1
+ STAAY CBBUF+1
+ ADC OUTBSZ+1
+ STAAY CBBUFE+1
+ JMP SEND ;Send message  ...
+
+
+MSDELY ROUT
+ CPYIM 0
+ BEQ #30 ;If no delay, Exit
+ PHA ;Keep Acc.
+ PHX ;Keep X
+ PHY
+ LDXIM 0
+; TYA ;Keep delay time (in msecs)
+; SEC
+; SBCIM 30 ;subtract 30 ys for polling loop
+; CMPIM &E3
+; BCS #20 ;skip , ok
+; TAY
+10 DEX
+ BNE #10 ;1msec loop
+ DEY
+ BNE #10 ;Outer loop
+20 PLY ;Reset delay time
+ PLX ;Reset X
+ PLA ;Reset A
+30 RTS
+
+ LNK UADE20A
