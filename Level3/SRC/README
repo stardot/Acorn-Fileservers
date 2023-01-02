@@ -1,8 +1,9 @@
-Level 3 File Server v1.06
+Level 3 File Server v1.07
 =========================
 
-This disc contains the original source code for the Acorn Level 3 
-File Server. 
+This disc contains a recreation of the source code for the Acorn Level 3 
+File Server. It has been achieved by using the original binary and the 
+source code from v1.06. 
 
 Assembling the File Server Source Code
 ======================================
@@ -38,33 +39,28 @@ Files
   Location for the assembled parts. Do not delete or the assembler will fail.
 
 
-Version 1.06
+Version 1.07
 ============
 
 Date - estimated about May 1987. Only one change comment dated 20/5/87
 
 Comments
 ========
-Some of these changes may have been made in v1.05, but there is no binary
-available to investigate. This is the original and unchanged source code.
+The version widely distributed having the version number v1.07 is the same as 
+v1.06 except it is assembled for the RTC dongle being absent. The differences 
+are the version number and the serial number in the binary.
 
-Changes (from v1.04)
+The code has been updated to include the date fix as an assembly option in 
+file Uade01. 
+Y2KPAT * 0 ; no(=0) Apply the JGH Patch (=1)
+
+Changes (from v1.06)
 ====================
-
 HEADER FILE 1
-         Uade01 Line 0060 VERLB, version changed from 4 to 6
-         
-MAPMAN
-         Uade10 Line 0300-0301 removed JSR FNDMAP, BNE MPCHJX
-                          when changing the size of a chain on disc
-         Uade10 Line 0322 BCS branch removed
+         Uade01 Line 0057 Option for assembly with date fix (file Uade01)
+         Uade01 Line 0060 VERLB, version changed from 6 to 7
 
-                          
-MAPMAN UTILS 2
-20/05/87 Uade12 Line 1086 bugfix: Map block not being marked as written
-                          after blocks have been deleted
-         Uade12 Line 1054 moved CBNT code block from line 1129 to 1056
-                          inline with other code
-         Uade13 Line 0481 bugfix: in routine MPGTSZ - find size of object
-         Uade13 Line 0567 bugfix: PLA PLA removed from routine
-   
+Allows startup entry of years from 1981 to 2080 (file Uade04)
+Status line date displays years after 1996 correctly (file Uade04)
+Years after 1996 in *INFO reports are displayed correctly (file Uade04)
+Dates are displayed as dd/mm/yy instead of dd:mm:yy (file Uade0E)

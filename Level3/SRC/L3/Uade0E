@@ -513,16 +513,29 @@ OUTRTD
 ;TDATE DURING INITDV
 
  LDA TDATE
+ 
+ [ Y2KPAT=1 ; Modify output for year 1997+
+ JSR PUTDAT 
+ LDAIM "/"
+ |
  JSR OUTDEC
 
  LDAIM ":"
+ ] 
+ 
  JSR OUTCH
 
  LDA TDATE + 1
  PHA
  ANDIM &F
  JSR OUTDEC ;MONTH
+
+ [ Y2KPAT=1
+ LDAIM "/"
+ |
  LDAIM ":"
+ ] 
+
  JSR OUTCH
 
  PLA
@@ -535,7 +548,12 @@ OUTRTD
 ;ADD TO GET BASEYR
 
  ADCIM BASEYR
+ [ Y2KPAT=1
+ JSR Y2KP25 
+ |
  JSR OUTDEC
+ ]
+ 
  JMP OUTSP
 
 

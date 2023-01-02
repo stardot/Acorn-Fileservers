@@ -1,3 +1,38 @@
+Version 1.07
+============
+
+Date - estimated about May 1987. Only one change comment dated 20/5/87
+
+Binary Files (* denotes the official ACORN released version)
+============
+  FS3-107   - Assembler options: DONGLE=1 (dongle absent)
+  FS3-107y  - Assembler options: DONGLE=1 (dongle absent)
+                                 Y2KPAT=1 (date fix)
+                                 
+Comments
+========
+The version widely distributed having the version number v1.07 is the same as 
+v1.06 except it is assembled for the RTC dongle being absent. The differences 
+are the version number and the serial number in the binary.
+
+The code has been updated to include the date fix as an assembly option in 
+file Uade01. 
+Y2KPAT * 0 ; no(=0) Apply the JGH Patch (=1)
+
+Changes (from v1.06)
+====================
+HEADER FILE 1
+         Uade01 Line 0057 Option for assembly with date fix (file Uade01)
+         Uade01 Line 0060 VERLB, version changed from 6 to 7
+
+Allows startup entry of years from 1981 to 2080 (file Uade04)
+Status line date displays years after 1996 correctly (file Uade04)
+Years after 1996 in *INFO reports are displayed correctly (file Uade04)
+Dates are displayed as dd/mm/yy instead of dd:mm:yy (file Uade0E)
+
+
+-------------------------------------------------------------------------------
+
 Version 1.06
 ============
 
