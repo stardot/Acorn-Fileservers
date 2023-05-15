@@ -1,5 +1,30 @@
-Version 1.24
+Version 1.24c
+=============
+
+Date - unknown
+
+Clock hack to set the clock to 1/1/1984 at 12:30:00
+
+Binary Files (* denotes the official ACORN released version)
 ============
+  FS3-124c - Assembler options: DONGLE=1 (absent)
+  PATCHFS  - The original BASIC program to patch the FS code
+
+Comments
+========
+There was a patch program for v1.24 to simply set the clock and not use the RTC.
+This has been incorporated into the code with an assembler directive CHACK.
+
+Changes (from v1.24)
+====================
+Option for assembly with Clock Hack (file Uade01)
+Code to fix the values and prevent updated from RTC (file Uade04)
+
+
+-------------------------------------------------------------------------------
+
+Level3 Version 1.24
+===================
 
 Date - estimated between Jun 87 and Feb 1988.
 
@@ -11,20 +36,15 @@ include 1/2/12/15/26 June 1987, 1/9/24 July 1987, 8/18/24 Feb 1988 and
 
 Binary Files (* denotes the official ACORN released version)
 ============
-  FS3-124   - Assembler options DONGLE absent, Pseudo directory symbols No
-  FS3-124d  - Assembler options DONGLE present, Pseudo directory symbols No 
-  FS3-124p  - Assembler options DONGLE absent, Pseudo directory symbols Yes
-* FS3-124dp - Assembler options DONGLE present, Pseudo directory symbols Yes
+  FS3-124  - Assembler options: DONGLE=1 (absent)
+* FS3-124d - Assembler options: DONGLE=0 (present)
 
 
 Comments
 ========
 This code has been created using the v1.31 source code. Within that code there
 are options for Lang English/Italian (added Feb 1987) and the Pseudo directory 
-symbols (%, &, @). Pseudo directory symbols were definately available in v1.24, 
-but as the comment for the switch option is dated 1988, it is possible that it 
-was hard coded and later modified to be an option at assembly time. The switch 
-has been left in.
+symbols (%, &, @). Pseudo directory symbols were present in v1.24, but later a switch option was added and is not present in later versions.
 
 Changes (from v1.06)
 ====================
@@ -38,8 +58,8 @@ Pseudo directory symbols (%, &, @)
 
 -------------------------------------------------------------------------------
 
-Version 1.07
-============
+Level3 Version 1.07
+===================
 
 Date - estimated about May 1987. Only one change comment dated 20/5/87
 
@@ -73,8 +93,8 @@ Dates are displayed as dd/mm/yy instead of dd:mm:yy (file Uade0E)
 
 -------------------------------------------------------------------------------
 
-Version 1.06
-============
+Level3 Version 1.06
+===================
 
 Date - estimated about May 1987. Only one change comment dated 20/5/87
 
@@ -112,8 +132,8 @@ MAPMAN UTILS 2
        
 -------------------------------------------------------------------------------
 
-Version 1.04
-============
+Level3 Version 1.04
+===================
 
 Date - estimated sometime after June 1986. no dated comments after June 1986
 
@@ -148,8 +168,8 @@ DSCMAN
 
 -------------------------------------------------------------------------------
 
-Version 1.03
-============
+Level3 Version 1.03
+===================
 
 Date - estimated about June 1986. Last comment was 5/6/86
 
@@ -179,8 +199,8 @@ DSCMAN
 
 -------------------------------------------------------------------------------
 
-Version 1.01
-============
+Level3 Version 1.01
+===================
 
 Date - estimated about Jan 1986
 
@@ -292,8 +312,8 @@ COMMAND PROCESSOR
 
 -------------------------------------------------------------------------------
 
-Version 0.92
-============
+Level3 Version 0.92
+===================
 
 Date - Dec 1998
 
@@ -323,17 +343,19 @@ Dates are displayed as dd/mm/yy instead of dd:mm:yy (file Uade0E)
 
 -------------------------------------------------------------------------------
 
-Version 0.90 Pre-Release IV.05
-==============================
+Level3 Version 0.90 Pre-Release IV.05
+=====================================
 
-Date - estimated. May-Oct 1985 (possibly 4 May from the pre-release version). 
+Date - estimated. May-Oct 1985 (possibly 4 May from the pre-release version).
        Two comments are dated after that date but with code included in the 
        binary. The comments could have been added at a later date to already
        existing code or versions were kept the same but the code was different.
        That would date the code to Oct 1985. There are changes labelled 
        15/12/85 that are not in this binary. The assembler directive file FSASM
        has the comment updated by Glenn 8/5/85.
-       
+       Level3 File server was first included in the Technomatic advert in Acorn
+       User magazine issue of April 1985.
+
 Binary Files (* denotes the official ACORN released version)
 ============
 * FS3-090  - Dongle absent
@@ -341,13 +363,13 @@ Binary Files (* denotes the official ACORN released version)
 
 Comments
 ========
-There are two Trace debug pieces of code in the final binary although the 
+There are two trace debug pieces of code in the final binary although the 
 DEBUG directive is set to 0 (file Uade14) and the binary performs a simple RTS
 when it is called.
 
 There is also a version of the same code with the banner displaying BARSON
 COMPUTERS. Barson were one of Acorn's distributors in Australia and it looks
-like the branding was probably done by hex editing the binary directly rather 
+like the branding was probably done by hex editing the binary directly rather
 than altering the code.
 
 Changes

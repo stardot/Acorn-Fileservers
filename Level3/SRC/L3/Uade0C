@@ -202,7 +202,6 @@ DRRET2 LDYIM ARGH
  BPL #22
  BMI #05 ;**23/1/87** complete info entry a la root
 
- [ Pseudods = Yes
 25 LDYIM 1 ;**20/5/87** check lone pseudo-directory
  LDAIY NAMPTR
  CMPIM TERMIN
@@ -213,9 +212,6 @@ DRRET2 LDYIM ARGH
  BNE #27
  JSR LOADDR ;**20/5/87** load directory
  BNE #60
- |
-25 BNE #27
- ]
 26 JSR UNLOCK
  JMP #21 ;**20/5/87** go update details  
  
@@ -520,14 +516,12 @@ DRCRDR ROUT
  JSR UNLOCK ;release parent pro tem
  JSR TSTPAR ;prohibit new name of "^"
  BEQ #50
- [ Pseudods = Yes
  LDYIM 0 ;**20/5/87** prohibit new names of "&", "%", "@"
  LDAIY NAMPTR
  JSR Testpd
  BNE #15
  JSR TSTTER
  BEQ #50
- ]
 15 LDYIM ARGG
  LDAIY ARGPTR
  STA DIRWC ;**24/7/87** get wild card flag again
