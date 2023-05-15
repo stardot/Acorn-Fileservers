@@ -57,16 +57,17 @@ Sys * &FF ;flags to indicate which type of FS
 Ztime * &FF
 FS * &FF
 Dongle * 0 ;Real Time Clock present(=0) absent(=1)
+CHACK * 1 ; no(=0) Apply the Clock Hack Patch (=1)
 
 Debug * 0 ;Make this +ve for debug letters
 
 Verla * "2" ;Version level .... two digits
 Verlb * "4" ;Range 0-99
+
 Lang * English
 Mask * &3F ;protection state (&3F for service system)
 Yes * 0
 No * &FFFF
-Pseudods * Yes ; **18/2/88** Pseudo-directory (%, &, @) switch
 
 ;*** MODULE CODE NAMES ***
 

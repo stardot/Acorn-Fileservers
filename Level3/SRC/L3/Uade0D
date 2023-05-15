@@ -421,12 +421,10 @@ INITDV ROUT
  INY
  LDAIY NAMPTR ;**20/5/87** disc name, must prohibit "^","&", "%"
  CMPIM "^" ;**20/5/87** as these have a disc name implied
- [ Pseudods = Yes
  BEQ #15
  CMPIM "&"
  BEQ #15
  CMPIM "%"
- ]
  BNE #40
 15 INY
  LDAIY NAMPTR ;**20/5/87** check single char names only
@@ -523,13 +521,11 @@ INITDV ROUT
 
 ;LOOK UP ACCESS, DISC NUMBER, & SIN OF SELECTED DIR
 
- [ Pseudods = Yes
 72 LDA UMHUFD ;**20/5/87** "&", get ufd
  JMP #78
 
 74 LDA UMHLIB ;**20/5/87** "%", get lib
  JMP #78
- ]
   
 75 INY ;**20/5/87** check pseudo-directory names
  LDAIY NAMPTR ;**20/5/87** single char only
@@ -541,12 +537,10 @@ INITDV ROUT
  LDAIY NAMPTR
  CMPIM "^" ;**20/5/87** parent directory
  BEQ #85
- [ Pseudods = Yes
  CMPIM "&" ;**20/5/87** ufd
  BEQ #72
  CMPIM "%" ;**20/5/87** lib
  BEQ #74
- ]
 77 LDYIM UTHSLD ;OFFSET OF HANDLE FOR SELECTED DIR
  LDAIY DRUSIN ;A:=HANDLE FOR SELECTED DIR
 78 JSR FNDHND ;FIND HANDLE IN HANDTB
@@ -1245,14 +1239,12 @@ TSTPAR ;**23/1/87**
 
 TESTPD ROUT ;**2/6/87** test pseudo-directory name
  CMPIM "^"
- [ Pseudods = Yes
  BEQ #10
  CMPIM "&"
  BEQ #10
  CMPIM "%"
  BEQ #10
  CMPIM "@"
- ]
 10 RTS
 
 TSTOWN ROUT

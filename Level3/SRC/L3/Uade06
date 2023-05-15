@@ -913,10 +913,8 @@ MAKHDS ROUT
  BNE #20
 
  STA UMHUFD ;make this the handle for the UFD
- [ Pseudods = Yes
  LDYIM UTHUFD ;**26/6/87** and store in user table
  STAIY USTPTR
- ]
 
  JSR OPEN ;now get a handle for selected dir
  BEQ #10

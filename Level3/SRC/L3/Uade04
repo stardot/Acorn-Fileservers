@@ -822,7 +822,12 @@ SETYR ASLA
                                                       
 
 SETTME ROUT
+ [ CHACK = 1
+ RTS ; REM STOP CLOCK READ
+ = :LSB:MUNTHS, :MSB:MUNTHS ; fill
+ |
  LDA MUNTHS
+ ]
  LSRA
  LSRA
  LSRA
@@ -919,7 +924,21 @@ PRTIM2 JSR DWIND ;set up window
  JMP MWIND ;reset window and return
  
 RTC ;check that the read time clock is present
-
+ [ CHACK = 1
+ LDAIM 30
+ STA &8A94 ; \MINUTES
+ LDAIM 12
+ STA &8A95 ; \HOURS
+ LDAIM 1
+ STA &8A7E ; \DAY
+ STA &8A96 ; \..
+ LDAIM &31
+ STA &8A7F ; \high nibble = YEAR FROM 1981, low nibble = MONTH
+ STA &8A97 ; \..
+ LDAIM 0   ; \ensure clock test passed
+ STA &8A93 ; \SECONDS
+RTCX RTS
+ |
  LDXIM 7
  LDAIM &71
  JSR #95 ;write the minutes alarm register
@@ -937,10 +956,15 @@ RTC ;check that the read time clock is present
  JSR #00 ;read result
  CMPIM 0
 RTCX RTS ;returns EQ if dongle present
-
+ ]
+ 
 RDDONG
-
+ [ CHACK = 1
+ RTS
+ = 6 ; REM STOP CLOCK READ
+ |
  LDXIM 6 ;read minutes
+ ]
  JSR #00
  JSR #70
  STA MINS

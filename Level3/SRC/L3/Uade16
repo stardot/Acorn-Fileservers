@@ -377,11 +377,9 @@ LOAD ROUT
  JSR GETUSE  ;Get user info. using FINDMC
  BNE #17 ;Fail, exit
 
- [ Pseudods = Yes
  LDYIM UTHUFD ;**1/7/87** fix up user root directory
  LDAIY USTPTR
  STA UMHUFD
- ]
 
  JSR LDRETR ;Do retrieve
  BEQ #20 ;OK, continue
