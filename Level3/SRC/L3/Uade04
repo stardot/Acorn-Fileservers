@@ -300,7 +300,12 @@ PRNTDG ROUT
  BEQ #20
 15 JSR #40
  JMP #30
-20 LDAIM " "
+20 
+ [ Y2KPAT =1
+ LDAIM "0" ; Display leading zeros
+ |
+ LDAIM " "
+ ]
  JSR OSWRCH
 30 PLA
 40 CLC
@@ -685,11 +690,19 @@ DWIND ;set window for printing the date in
  RTS
 
 YR ROUT
+ [ Y2KPAT =1
+ JSR GetYear ; Display status line year correctly
+ NOP
+ NOP
+ NOP
+ NOP
+ |
  LDA DATE+1
  LSRA
  LSRA
  LSRA
  LSRA
+ ]
  CLC
  ADCIM BASEYR
  PHA
@@ -701,8 +714,11 @@ YR ROUT
 20 
  JSR PRNTDG
  PLA
+ [ Y2KPAT =1
+ JMP OutYear ; Display status line year correctly
+ |
  JMP PRNTDG
-
+ ]
 
 MONTH ROUT
  LDA DATE+1
@@ -750,9 +766,16 @@ MTAB2
 
 
 DATE1 ROUT
+ [ Y2KPAT =1
+ LDA DATE      ; Displays status line date correctly
+ ANDIM 31
+ JSR xOutDate
+ NOP
+ |
  LDA DATE
  JSR PRNTDG
  LDA DATE
+ ]
  CMPIM 10
  BCC #20
  SBCIM 10
@@ -822,6 +845,46 @@ SETYR ASLA
                                                       
 
 SETTME ROUT
+ [ Y2KPAT =1
+ RTS ; Never write to RTC
+OutYear 
+ CMPIM 100
+ BCC xOutDate
+ SBCIM 100
+xOutDate
+ PHA
+ JSR PRNTDG
+ PLA
+ RTS
+GetYear
+ LDA DATE
+ ANDIM &E0
+ LSRA
+ STA tmp
+ LDA DATE+1
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ ORA tmp
+ RTS
+PutDate
+ ANDIM 31
+ BPL PutDec
+PutYear
+ PHA
+ LDA TDATE
+ ANDIM &E0
+ LSRA
+ STA tmp
+ PLA
+ ADC tmp
+ CMPIM 100
+ BCC PutDec
+ SBCIM 100
+PutDec
+ JMP OUTDEC
+ |
  LDA MUNTHS
  LSRA
  LSRA
@@ -853,7 +916,8 @@ SETTM1 LDA MUNTHS
  JSR #95
  
  JMP SCDATE ; SHOW DATE ON SCREEN
-
+ ]
+ 
 SETMFX  ; FIX MONTH AND FLAG ON SET TIME
  PHA    ; stack month and year
  ANDIM &0F ; Mask MONTH
@@ -919,7 +983,90 @@ PRTIM2 JSR DWIND ;set up window
  JMP MWIND ;reset window and return
  
 RTC ;check that the read time clock is present
+ [ Y2KPAT =1
+ JMP RDDONG ; Jump straight to read RTC
+ConvBCD
+ TXA
+ PHA
+ LDAAX blk
+ LDXIM &FF
+ SEC
+ SED
+20
+ INX
+ SBCIM 1
+ BCS #20
+ CLD
+ TXA
+ STAAY STKPTR
+ PLA
+ TAX
+ LDAAY STKPTR
+ DEX
+ INY
+ RTS
+ NOP
+RTCX
+ RTS
 
+RDDONG            ; Read RTC, use OSWORD 14
+ LDXIM 0
+ STX blk+2
+ STX blk+1
+ INX
+ STX blk+0
+ LDXIM :LSB:blk
+ LDYIM :MSB:blk
+ LDAIM 14
+ JSR OSWORD
+ LDA blk+1
+ ORA blk+2
+ BNE #30
+ LDAIM &FF
+ RTS              ; &FF=NoClock
+30  
+ LDXIM 6
+ LDYIM &93        ; X=>OSWORD 14 block, Y=>FS date variables
+ JSR ConvBCD
+ JSR ConvBCD
+ JSR ConvBCD      ; seconds, minutes, hours
+ DEX
+ JSR ConvBCD
+ STA DATE         ; date
+ JSR ConvBCD
+ STA tmp
+ DEY              ; month
+ JSR ConvBCD
+ SEC
+ SBCIM 81         ; year-1981
+ BCS #40
+ ADCIM 100        ; year>1999
+40 PHA
+ ASLA
+ ASLA
+ ASLA
+ ASLA
+ ORA tmp
+ STA MUNTHS
+ STA DATE+1       ; yearLo+month
+ PLA
+ ASLA
+ ANDIM &E0
+ ORA DAYS
+ STA DAYS
+ STA DATE         ; yearHi+date
+ LDAIM 0
+ RTS              ; 00=OK
+tmp
+ = 0
+blk
+ = 0, 0, 0, 0, 0, 0, 0, 0, 0
+ = "ARESPA"
+ = "RESPARESPARESPAR"
+ = "ESPARESPARESPARE"
+ = "SPARESPARE"
+FINISH ROUT
+ |
  LDXIM 7
  LDAIM &71
  JSR #95 ;write the minutes alarm register
@@ -938,8 +1085,8 @@ RTC ;check that the read time clock is present
  CMPIM 0
 RTCX RTS ;returns EQ if dongle present
 
+ 
 RDDONG
-
  LDXIM 6 ;read minutes
  JSR #00
  JSR #70
@@ -1020,6 +1167,8 @@ LHFXNX
  LDAIM 29      ; Must be 29th
  BNE RFIXEX    ; Re Write DONGLE (ALWAYS)
 
+
+
 LHNFEB
  LDXIM 4
 LHCHKL CMPAX MW30D - 1
@@ -1036,7 +1185,7 @@ RFIXEX
 RFIXX2
  JSR CHKDTE
  JMP SETTME
-
+ ]
  
 00 PHP ;same as POKE
  TXA

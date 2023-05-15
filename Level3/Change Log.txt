@@ -1,3 +1,42 @@
+Version 1.25
+============
+
+Date - 20 Jan 2018
+
+Patch for Acorn Level3 File Server to allow the use of dates after 1996. This
+also allows the use of dates after 1999. In keeping with the 'Short Acorn Era',
+any two-digit year 00 to 80 is defined as being 2000 to 2080. Any two-digit
+year from 81 to 99 is defined as being 1981 to 1999.
+
+Binary Files (* denotes the official ACORN released version)
+============
+  FS3-125  - Assembler options: DONGLE=1 (absent)
+  FS3-125d - Assembler options: DONGLE=0 (present)
+
+
+Comments
+========
+This is NOT the Acorn released v1.25. It is the Acorn released v1.24 with a 
+date fix patch applied.
+
+This code has been created using the v1.24 source code and the BASIC patch
+source code by J.G.Harston. 
+
+The code has been updated to include the fix as an assembly option in file
+Uade01. 
+Y2KPAT * 0 ; no(=0) Apply the JGH Patch (=1)
+
+Changes (from v1.24)
+====================
+Option for assembly with date fix (file Uade01)
+The version number is now 1.25 (file Uade01)
+Allows startup entry of years from 1981 to 2080 (file Uade04)
+Status line date displays years after 1996 correctly (file Uade04)
+Years after 1996 in *INFO reports are displayed correctly (file Uade0E)
+
+
+-------------------------------------------------------------------------------
+
 Version 1.24
 ============
 
@@ -11,20 +50,15 @@ include 1/2/12/15/26 June 1987, 1/9/24 July 1987, 8/18/24 Feb 1988 and
 
 Binary Files (* denotes the official ACORN released version)
 ============
-  FS3-124   - Assembler options DONGLE absent, Pseudo directory symbols No
-  FS3-124d  - Assembler options DONGLE present, Pseudo directory symbols No 
-  FS3-124p  - Assembler options DONGLE absent, Pseudo directory symbols Yes
-* FS3-124dp - Assembler options DONGLE present, Pseudo directory symbols Yes
+  FS3-124  - Assembler options: DONGLE=1 (absent)
+* FS3-124d - Assembler options: DONGLE=0 (present)
 
 
 Comments
 ========
 This code has been created using the v1.31 source code. Within that code there
 are options for Lang English/Italian (added Feb 1987) and the Pseudo directory 
-symbols (%, &, @). Pseudo directory symbols were definately available in v1.24, 
-but as the comment for the switch option is dated 1988, it is possible that it 
-was hard coded and later modified to be an option at assembly time. The switch 
-has been left in.
+symbols (%, &, @). Pseudo directory symbols were present in v1.24, but later a switch option was added and is not present in later versions.
 
 Changes (from v1.06)
 ====================
@@ -333,6 +367,8 @@ Date - estimated. May-Oct 1985 (possibly 4 May from the pre-release version).
        That would date the code to Oct 1985. There are changes labelled 
        15/12/85 that are not in this binary. The assembler directive file FSASM
        has the comment updated by Glenn 8/5/85.
+       Level3 Fileserver was first included in the Technomatic advert in Acorn
+       User magazine issue of April 1985.
        
 Binary Files (* denotes the official ACORN released version)
 ============
@@ -341,7 +377,7 @@ Binary Files (* denotes the official ACORN released version)
 
 Comments
 ========
-There are two Trace debug pieces of code in the final binary although the 
+There are two trace debug pieces of code in the final binary although the 
 DEBUG directive is set to 0 (file Uade14) and the binary performs a simple RTS
 when it is called.
 
