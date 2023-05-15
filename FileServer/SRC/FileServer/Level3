@@ -1,0 +1,1 @@
+ OPT 2 ;> <FileServerSource>.Level3 TTL File server.  Initial variable setup for Level 3 variant.  File => Level3 ORG &400 GBLL $Level3 GBLL $CMOS$Level3 SETL 1=1 ; True$CMOS   SETL 1=0 ; False CPU 0 LNK Uade01

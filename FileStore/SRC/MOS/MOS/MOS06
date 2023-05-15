@@ -1,0 +1,13 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS06
+ TTL File server file MOS06
+
+
+ ORG &FC00
+
+ xFILL &FF,&FD00-&FC00 ; fill page with 256 bytes of &FF
+
+; This page is taken up by the memory mapped hardware
+
+
+
+ LNK DOS03

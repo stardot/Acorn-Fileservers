@@ -1,0 +1,1114 @@
+
+ OPT UADE0F ;> Uade0F
+ TTL File server file UADE0F
+
+;**********************
+;*    A U T M A N     *
+;**********************
+
+;AUTMAN: THE AUTHENTICATION MANAGER
+;THE PASSWORD FILE CONTAINS A NUMBER
+;OF ENTRIES, EACH OF WHICH HAS THE FOLLOWING FORM:-
+;0) USERID (10 BYTES)
+;1) PASSWORD (6 BYTES)
+;4) Free space (4 bytes)
+;3) FLAG (1 BYTE) - INUSE & privileges FLAG
+
+APWIND * 4 ;window size in blocks
+
+;***** MAIN ROUTINE *****
+
+AUTMAN ROUT
+ LDXIM 10 ;AUTMAN HAS 10 ENTRY POINTS
+ LDAIM MODAUT ;A:=NAME OF THIS MODULE
+ JSR ENTRY
+ LDAAX ATRTNS
+ STA ATJUMP+1
+ LDAAX ATRTNS+1
+ STA ATJUMP+2
+ LDAIM 0
+ STA ATDRIV ;**23/1/87**  altered in ATNWUS
+ LDAIM 9
+ STA ATWORK ;**31/10/83** >0 -> dont keep window with empty slot
+ JSR SETFS
+ATJUMP JMP ATJUMP
+ATRTNS
+ & ATNWUS ;1 => NEW USER
+ & ATCKPW ;2 => CHECK PASSWORD
+ & ATSTPW ;3 => SET PASSWORD
+ & ATDLUS ;4 => DELETE USER
+ & ATSPRV ;5 => SET PRIVILEGE
+ & ATREST ;6 => RESTART
+ & ATSOPT ;7 => SET "USER OPTION"
+ & ATENS  ;8 => Update user disc space in PW file ** 2/10/84 **
+ & ATFREE ;9 => Return user disc space
+ & ATWRIT ;10=> Write user disc space
+ATEXIT JMP PREXIT
+
+PWTITL = "$.PASSWORDS",CR
+
+;***** ATNWUS *****
+
+;ATNWUS: NEW USER - MAKE AN ENTRY IN THE PASSWORD FILE
+
+;ENTRY:
+;ARGB-C PTR TO USERINFO
+;ARGD-E PTR TO USERID
+
+;EXIT:  ARGA = RC
+
+;FUNCTION:-
+;0) CHECK THAT CALLER HAS SYSTEM PRIV
+;1) CHECK THAT USERID DOES NOT EXIST ALREADY
+;2) CHECK SYNTAX OF USERID
+;3) MAKE AN ENTRY IN PW FILE
+
+ATNWUE ROUT ;Here to enlarge the file on retry
+ STA ATWORK ;Nonzero flag
+ JSR APENRG ;Enlarge the file
+ BNE ATEXIT
+
+ATNWUS ROUT
+ LDAIM 0
+ STA DOTFLG
+ JSR CHKPRV ;CHECK THAT CALLER HAS SYSTEM PRIV
+ BNE ATEXIT
+ JSR SETAUT ;AUTPTR:=PTR TO USERID
+
+;SEE IF USERID EXISTS ALREADY
+
+ LDAIM 0
+ STA ATDRIV
+ JSR FDUSID
+ BNE #05
+ LDAIM ATERRF ;USERID ALREADY IN USE
+ BNE #27
+
+;Find free slot in p/w file
+
+05 LDAIM 0
+ STA ATWORK ;Find free slot
+ STA ATDRIV ;**23/1/87** First drive to scan in default
+ JSR ATOPWF ;**22/3/88** Open suitable password file
+ BEQ #10
+ CMPIM ATERRB ;Not found?
+ BEQ ATNWUE ;Go enlarge file
+ BNE ATEXIT ;Exit on other error 
+
+;Check syntax of userid
+
+10 LDYIM 0
+ STY DOTFLG
+20 LDXIM MAXID
+ LDAIY AUTPTR ;Check first char is alpha only
+ JSR ISCHAR
+ BCS #25 ;Nope -> error
+
+22 LDAIY AUTPTR
+ JSR ISDCHA ;Is digit or char
+ BCS #24 ;Nope
+ INY
+ DEX
+ BNE #22
+
+ LDAIY AUTPTR ;Check char after user id. is terminator
+24 CMPIM CR
+ BEQ #30 ; => continue
+
+ CMPIM DOT
+ BNE #25
+
+ LDA DOTFLG
+ BNE #25
+ INC DOTFLG
+
+ CPYIM MAXID+1 ;should have had a "." before this
+ BCS #25
+ INY
+ BCC #20
+
+25 LDAIM ATERRG ;SYNTAX ERROR IN USERID
+27 JMP #65
+
+;SEE IF THERE IS ANY ROOM IN PW FILE
+
+30 TYA ;Check if ptr. zero
+ BEQ #25 ; => bad user id.
+ EORIM MAXUNM
+ STA DOTFLG ;0=> maximum length
+
+ LDYIM PWUSID
+35 LDAIY AUTPTR ;Set userid (terminated CR)
+ CMPIM DOT
+ BNE #40
+
+ LDX DOTFLG
+ BNE #40
+
+ LDA PWFPTR
+ BNE #37
+ DEC PWFPTR+1
+37 DEC PWFPTR
+ JMP #45
+
+40 STAIY PWFPTR
+ CMPIM CR
+ BEQ #50 ;Check for end of userid
+45 INY
+ BNE #35
+
+50 LDA DOTFLG
+ BNE #55
+
+ INC PWFPTR
+ BNE #55
+ INC PWFPTR+1
+
+55 LDYIM PWPASS
+ LDAIM TERMIN
+ STAIY PWFPTR ;PASSWORD = ""
+
+ LDYIM PWFREE ;space allocation always maximum
+ LDAIM 4
+ LDXIM UTFRLN-1
+60 STAIY PWFPTR ;** 2/10/84 **
+ INY
+ DEX
+ BNE #60
+ TXA
+ STAIY PWFPTR
+
+ LDYIM PWFLAG
+ LDAIM INUSE
+ STAIY PWFPTR
+ JSR MARKDT ;MARK PW FILE DIRTY
+ LDAIM 0 ; success return code
+65 JSR APENFL ;**25/12/86** flush from cache
+ JMP ATEXIT
+
+ATOPWF ROUT ;**22/5/88**
+ JSR CHKPRV ;**23/1/87** To get GENPTR:=Userinfo
+ BNE #10
+ LDYIM UTDISC
+ LDAIY GENPTR
+ TAX
+ INY
+ LDAIY GENPTR
+ LDYIM ARGC
+ STAIY NEWARG ;Selected disc number to stack
+ TXA
+ DEY
+ STAIY NEWARG
+ LDAIM 15
+ JSR SETRTN
+ JSR MAPMAN ;MAPMAN.MPDRNB
+ BNE #07 ;use default if error
+ LDYIM ARGB
+ LDAIY NEWARG ;Else get selected drive number
+ STA ATDRIV
+07 JSR FDUSID
+10 RTS
+
+;***** ATCKPW *****
+
+;ATCKPW: CHECK PASSWORD
+
+;ENTRY:
+;ARGB-C SPARE
+;ARGD-E PTR TO USERID FOLLOWED BY PW
+
+;EXIT:  ARGA = RC
+;ARGB-E LS User disc space **2/10/84**
+;ARGF = FLAG BYTE FROM PW FILE
+;ARGG = Drive number of PW file **25/12/86**
+
+ATCKPW ROUT
+ JSR SETAUT ;AUTPTR:=PTR TO USERID
+ JSR FDUSID ;SEARCH PW FILE FOR USERID
+ BNE #30
+
+ JSR ATFIND ;is user already logged on
+ BCC #10 ;yes
+
+ LDAIM PWFREE
+ LDXIM PWFPTR
+ BNE #20 
+
+10 JSR ATFPTR ;make pointer
+ LDAIM UTFREE
+ LDXIM GENPTR
+
+20 STA OFF1
+ LDYIM ARGPTR
+ LDAIM ARGB
+ STA OFF2
+ LDAIM 4
+ JSR MOVBLK ;general move routine
+
+ LDYIM PWFLAG
+ LDAIY PWFPTR
+ LDYIM ARGF
+ STAIY ARGPTR
+ INY
+ LDA ATDRIV
+ STAIY ARGPTR ;**25/12/86** Set PW file drive
+
+;NOW SEE IF PASSWORDS MATCH
+
+ JSR CHEKPW
+ JSR APENFL ;remove the referenced block
+30 JMP ATEXIT
+
+;***** ATSTWP *****
+
+;ATSTPW: SET PASSWORD
+
+;ENTRY:
+;ARGB-C PTR TO USERINFO
+;ARGD-E PTR TO OLD PW FOLLOWED BY NEW PW
+
+;EXIT:  ARGA = RC
+
+;FUNCTION:- IF OLD PW MATCHES
+;EXISTING PW IN PW FILE THEN CHANGE PW.
+
+ATSTPW ROUT
+ JSR SETAP1 ;Set AUTPTR to point to user id.
+ JSR FDUSID ;SEARCH PW FILE FOR USERID
+ BNE #50
+
+;NOW SEE IF OLD PW MATCHES THAT IN PW FILE
+
+ LDYIM ARGD
+ LDAIY ARGPTR
+ STA AUTPTR
+ INY
+ LDAIY ARGPTR
+ STA AUTPTR+1 ;AUTPTR USED BY CHEKPW
+ LDYIM 0 ;Offset for first pw
+ JSR CHEKP1
+ BNE #40
+
+;CHECK SYNTAX OF NEW PW
+
+ JSR STEPUR ;Step Y past first PW
+ STY OFF1 ;OFFSET FOR START OF NEW PW
+ LDXIM MAXPW
+10 LDAIY AUTPTR
+ CMPIM TERMIN
+ BEQ #30
+ JSR ISDCHA ;Is digit or character ?
+ BCS #20 ;Nope => error
+
+ INY
+ DEX
+ BNE #10
+ LDAIY AUTPTR
+ CMPIM TERMIN
+ BEQ #30 ;SYNTAX OF PW OK
+20 LDAIM ATERRE
+ BNE #40
+
+;NOW COPY NEW PW INTO PW FILE
+
+30 LDAIM PWPASS ;Copy new PW into PW file
+ STA OFF2 ;Note OFF1 already set
+ LDXIM AUTPTR ;"From" ptr.
+ LDYIM PWFPTR ;"To" ptr.
+ LDAIM MAXPW
+ JSR MOVBLK
+
+ JSR MARKDT ;MARK PW FILE STORE BUFFER DIRTY
+ LDAIM 0
+40 JSR APENFL ;clear out the referenced block
+50 JMP ATEXIT
+
+;***** ATDLUS *****
+
+;ATDLUS: DELETE USER FROM PASSWORD FILE
+
+;ENTRY:
+;ARGB-C PTR TO USERINFO
+;ARGD-E PTR TO USERID
+
+;EXIT:  ARGA = RC
+
+ATDLUS ROUT
+ JSR ATOPWF ;**22/3/88** Open suitable password file
+ BNE #30 ;**22/3/88** br if error including unprivileged
+
+;NOW CLEAR PASSWORD FILE ENTRY
+
+ LDXIM PWENSZ
+ LDYIM 0
+ TYA
+10 STAIY PWFPTR
+ INY
+ DEX
+ BNE #10
+ JSR MARKDT ;MARK PW FILE BUFFER DIRTY
+ LDAIM 0
+ JSR APENFL ;Flush PW FILE
+
+30 JMP ATEXIT
+
+;***** ATSPRV *****
+
+;ATSPRV: SET PRIVILEGE OF A SPECIFIED USER
+
+;ENTRY:
+;ARGB-C PTR TO USERINFO
+;ARGD-E PTR TO USERID
+;ARGF = PRIV. FLAG (0 => user, 1 => syst priv, 2 => low priv)
+
+;EXIT:  ARGA = RC
+
+ATSPRT = 0, SYSTPV, LOPRIV, 0 ; table for priv bits *** 25/5/86 ***
+
+ATSPRV 
+ JSR ATOPWF ;**22/3/88** Open suitable password file
+ BNE #30 ;**22/3/88** br if error including unprivileged
+
+ LDYIM ARGF
+ LDAIY ARGPTR ;Load priv. flag
+ ANDIM 3 ;**25/5/86** mask low value bits
+ TAY ;**25/5/86** for indexing
+ LDAAY ATSPRT ;**25/5/86** get priv bit setting
+ STA ATWORK ;Mask to be OR'd in to PW file
+ LDYIM PWFLAG
+ LDAIY PWFPTR
+ ANDIM NTSYST-LOPRIV ;**25/5/86** Mask off priv bits
+ JMP ATENPW ;OR in ATWORK, ensure PW file
+
+;***** ATREST *****
+
+;ATREST: AUTMAN.RESTART
+;FINDOUT THE DISC NUMBER OF THE DISC
+;WHICH CONTAINS THE PASSWORD FILE.
+;NOTE IF PW FILE NOT FOUND A <>0 RC IS RETURNED
+
+;EXIT:  ARGA = RC
+
+ATREST ROUT
+ LDAIM :LSB:ATUSRI
+ STA ATUSPT
+ LDAIM :MSB:ATUSRI
+ STA ATUSPT+1 ;ATUSPT := PTR TO AUTMAN'S USERINFO AREA
+
+ LDAIM ATERRA ;**25/12/86** Assume the worst
+ STA ATWORK
+
+ LDYIM UTPRIV
+ LDAIM SYSTPV+INUSE
+ STAIY ATUSPT ;AUTMAN HAS SYSTEM PRIV
+ LDAIM 0
+ STA ATDRIV ;DRIVE NUMBER
+10 LDA ATDRIV ;A:=DRIVE NUMBER
+ JSR DRVINF ;MAPMAN.DRIVEINFO
+ BNE #30 ;**14/06/86**
+
+ JSR RETPWF ;RETRIEVE PW FILE
+ BEQ #20
+ CMPIM DRERRC ;IF RC=CANNOT FIND OBJECT THEN TRY NEXT DRIVE
+ BEQ #30
+ JSR INTERR
+20 LDAIM 0
+ STA ATWORK ;**25/12/86** PW file found
+30 INC ATDRIV ;ATDRIV+:= 1
+ LDA ATDRIV ;**14/06/86**
+ CMP DRIVES ;**14/06/86**
+ BCC #10 ;**14/06/86** Continue until all checked
+ LDA ATWORK ;**25/12/86** RC reflects presence of password file
+ JMP ATEXIT
+
+
+;***** ATSOPT *****
+
+;Set user option bits in PW flag (bottom two bits)
+
+;ENTRY: ARGB/C = ptr. to user info (lo/hi)
+;       ARGD   = new option bits (bottom two bits)
+
+;EXIT : ARGA   = RC
+
+ATSOPT ROUT
+ JSR SETAP1 ;Set AUTPTR -> user id.
+ JSR FDUSID ;Find user id. in pw file
+ BNE #20
+ LDYIM ARGD
+ LDAIY ARGPTR
+ ANDIM OPTMSK ;Mask off option bits
+ STA ATWORK
+ LDYIM PWFLAG
+ LDAIY PWFPTR ;Read PW flag byte
+ ANDIM NTOPT ;Mask off all but option bits
+
+ATENPW
+
+;Exit code shared by ATSPRV
+
+ ORA ATWORK ;OR in option bits
+ CMPIY PWFPTR ;**25/12/86** Has option changed?
+ BEQ #10 ;**25/12/86** skip marking dirty if not
+ STAIY PWFPTR
+ JSR MARKDT ;Mark PW file dirty
+10 LDAIM 0 ;Return code (restored over ENSPWF)
+ JSR APENFL ;Ensure PW file
+20 JMP ATEXIT
+
+;***** ATENS *****
+
+;ensure that user disc allocation is up to date
+;on disc.
+
+;ENTRY ARGB,C unset
+;      ARGD,E pointer to user id
+;      ARGF,G,H,I value to write
+
+ATENS ROUT
+ JSR SETAUT ;point to userid
+ JSR FDUSID ;lookup the name
+ BNE #60
+
+10 LDAIM ARGF
+ STA OFF1
+ LDAIM PWFREE
+ STA OFF2
+ LDXIM ARGPTR
+ LDYIM PWFPTR
+ LDAIM 0 ;**25/12/86** prepare move routine
+ JSR MOVBLK
+ LDXIM UTFRLN
+ JSR COMPAR ;**25/12/86** has field changed?
+ BEQ #20 ;**25/12/86** no, do not mark dirty
+ LDXIM UTFRLN ;**25/12/86** yes, copy field
+ JSR MOVE ;**25/12/86** pointers are preset
+ JSR MARKDT
+20 JSR APENLV ;unlock PW file
+ LDAIM 0
+ BEQ #60
+
+;***** ATFREE *****
+
+;ENTRY ARGB,C ptr to callers info
+;      ARGD,E ptr to user name
+
+;EXIT  ARGB,C,D,E user free space
+
+ATFREE JSR ATFIND ;is user logged on
+ BNE #60 ;some error here
+ BCC #30 ;user logged on
+
+ JSR SETAUT
+ JSR FDUSID
+ BNE #60 ;not found
+
+ LDAIM PWFREE
+ STA OFF1
+ LDXIM PWFPTR
+ SEC
+ BCS #40
+
+30 JSR ATFPTR ;grasp pointer from stack
+ LDAIM UTFREE
+ STA OFF1
+ LDXIM GENPTR
+ CLC
+
+40 LDAIM ARGB
+ STA OFF2
+ LDYIM ARGPTR
+
+ PHP
+ LDAIM 4
+ JSR MOVBLK ;copy the info to the appropriate place
+ PLP
+ LDAIM 0
+ BCC #60
+50 JSR APENFL
+
+60 JMP ATEXIT ;and return to caller
+
+
+
+;***** ATWRIT *****
+
+;ENTRY as for ATFREE+ ARGF-I value to write
+
+ATWRIT ROUT
+ JSR CHKPRV
+ BNE #30 ;check for priv
+
+ LDYIM ARGD
+ LDAIY ARGPTR
+ TAX
+ INY
+ LDAIY ARGPTR
+ LDYIM ARGC
+ STAIY NEWARG
+ DEY
+ TXA
+ STAIY NEWARG ;pointer to name
+
+ LDAIM ARGF
+ STA OFF1
+ LDXIM ARGPTR
+ LDAIM ARGD
+ STA OFF2
+ LDYIM NEWARG
+ LDAIM 4
+ JSR MOVBLK
+
+ LDAIM 9
+ JSR SETRTN ;call update user free space
+ JSR USRMAN
+ BNE #30
+
+ JSR SETAUT
+ JSR FDUSID
+ BNE #30 ;not found
+
+ LDAIM PWFREE ;area to copy to
+ STA OFF2
+ LDYIM PWFPTR
+
+ LDAIM ARGF
+ STA OFF1
+ LDXIM ARGPTR
+
+ LDAIM 4
+ JSR MOVBLK
+
+ JSR MARKDT ;indicate that PW file is dirty
+ LDAIM 0
+ JSR APENFL ;flush the PW file block
+
+30 JMP ATEXIT
+
+ATFPTR LDYIM ARGF ;setup Zpage pointer from ARGE
+ LDAIY NEWARG
+ STA GENPTR
+ INY
+ LDAIY NEWARG
+ STA GENPTR+1
+ RTS
+
+ATFIND ROUT
+ LDXIM 4 ;EXIT Z=1 => ok user: C=1 => not logged on
+ LDYIM ARGB
+10 LDAIY ARGPTR
+ STAIY NEWARG
+ INY
+ DEX
+ BNE #10 ;copy stack for USRMAN
+
+ LDAIM 6 ;find user
+ JSR SETRTN
+ JSR USRMAN
+ CLC
+ BEQ #20 ;user found in table
+
+ CMPIM URERRE ;'not logged on'
+20 RTS
+
+SETAUT LDYIM ARGD
+ LDAIY ARGPTR
+ STA AUTPTR
+ INY
+ LDAIY ARGPTR
+ STA AUTPTR+1 ;AUTPTR:=ADDRESS OF USERID
+ RTS
+
+CHKPRV ROUT
+ LDYIM ARGB
+ LDAIY ARGPTR
+ STA GENPTR
+ INY
+ LDAIY ARGPTR
+ STA GENPTR+1
+ LDYIM UTPRIV
+ LDAIY GENPTR
+ ANDIM SYSTPV
+ BNE #10
+ LDAIM ATERRD ;INSUFFICIENT PRIV
+ RTS
+
+10 LDAIM 0
+ RTS
+
+;RETPWF: RETRIEVE PW FILE FROM DISC (ARGB-C HOLDS DISCNO)
+
+;FIRST SETUP ARGS FOR DIRMAN.RETRIEVE
+
+RETPTB = 2 ;DIRMAN.RETRIEVE
+ & ATUSRI ;userinfo
+ & PWTITL ;PW file title
+ & ATINF ;result area
+ = 0
+
+RETPWF ROUT
+ LDYIM ARGB ;**25/12/86** Copy disc no to UTDISC
+ LDAIY NEWARG
+ LDYIM UTDISC
+ STAIY ATUSPT
+ LDYIM ARGC
+ LDAIY NEWARG
+ LDYIM UTDISC+1
+ STAIY ATUSPT
+
+ LDYIM ARGA
+10 LDAAY RETPTB-ARGA
+ STAIY NEWARG
+ INY
+ CPYIM ARGI
+ BNE #10
+
+ JSR DIRMAN
+ BNE #30
+ LDYIM ARGB
+ LDAIY NEWARG
+ ANDIM TYPDIR
+ CMPIM TYPFIL
+ BEQ #20
+ LDAIM ATERRI ;$.PASSWORDS WRONG TYPE
+ JSR INTERR
+20 LDAIM 0 ;RC:=0
+30 PHP
+ CMPIM MPERRA ;DISC NOT FOUND
+ BNE #40
+ LDAIM ATERRA
+40 PLP
+ RTS
+
+; DSCSIA: Put arg, INFDIS & INFSIN on NEWARG stack
+; DSCSIN: Put just INFDIS & INFSIN on NEWARG stack
+; Exit:   Y=ARGF
+
+DSCSIA ROUT
+ JSR SETRTN ;**25/12/86**
+DSCSIN LDYIM ARGB ;PLACE DISC NO & SIN ONTO NEWARG STACK
+ LDA ATINF+INFDIS ;disc number (lo)
+ STAIY NEWARG
+ INY
+ LDA ATINF+INFDIS+1 ;disc number (hi)
+ STAIY NEWARG
+ INY
+ LDA ATINF+INFSIN
+ STAIY NEWARG ;SIN (ls)
+ INY
+ LDA ATINF+INFSIN+1
+ STAIY NEWARG ;SIN (cs)
+ INY
+ LDA ATINF+INFSIN+2
+ STAIY NEWARG ;SIN (ms)
+ RTS
+
+MARKDT LDA ATSTRA
+ STA GENPTR
+ LDA ATSTRA+1
+ STA GENPTR+1
+ JMP MRKDRT
+
+;FDUSID: SEARCH THE PW FILE FOR GIVEN USERID
+
+;ENTRY: AUTPTR = POINTER TO USERID
+;       ATDRIV = first drive to scan (usually zero)
+;       ATWORK = +- to search for userid, 0 to find free entry
+;                if 0, then ATDRIV has a hint for a first drive
+
+;EXIT:  A = RC
+;PWFPTR = PTR TO RELEVANT ENTRY IN PW FILE
+
+
+FDUSID ROUT
+ LDA ATDRIV ;**23/1/87** first drive to scan
+ LDY ATWORK ;**23/1/87** free entry with hint?
+ BNE #00
+ DEY
+ STY ATDRIV ;**23/1/87** so drive 0 up next after hint
+00 JSR DRVINF
+ BEQ #04 ;**25/12/86** Br if disc on this drive
+02 INC ATDRIV ;**25/12/86** Next drive
+ LDA ATDRIV
+ CMP DRIVES
+ BCC #00 ;**25/12/86** More drives, scan on
+ LDAIM ATERRB ;**25/12/86** Cannot find user id
+ RTS
+ 
+04 JSR APINIT ;get first block of entries
+ BEQ #05
+ CMPIM DRERRC ;**25/12/86** onto next disc if no pw file
+ BEQ #02
+
+05 LDAIM 0
+ STA DOTFLG ;initialise the flag for every lookup
+
+ LDYIM PWFLAG
+ LDAIY PWFPTR
+ ANDIM INUSE ;IS THE ENTRY IN USE?
+ BEQ #45
+
+ LDA ATWORK
+ BEQ #60
+ LDYIM PWUSID
+ STY TEMPA ;use registers to hold pointers
+ STY TEMPB ;pointer into PW file
+10 LDY TEMPA
+ LDAIY AUTPTR
+ JSR ISCHAR ;C=1 -> not alpha
+ LDY TEMPB
+ EORIY PWFPTR ;Compare with PW file
+ BCS #15
+ ANDIM &DF ;Compare with case forcing
+15 BNE #60
+
+ LDAIY PWFPTR ;Here are equal, so check if are terminators
+ CMPIM TERMIN
+ BEQ #40 ;Both terminators => found
+ 
+ CPYIM PWPASS-1 ; *** LH 24/10/85
+ BNE #20 ;Not last pair so continue
+ LDY TEMPA ;Check USERID terminated
+ INY
+ LDAIY AUTPTR
+ CMPIM TERMIN
+ BEQ #40 ;End and terminated
+ BNE #60 ;Not terminated so step on
+
+20 INC TEMPA
+ INC TEMPB
+ LDY TEMPA
+ LDAIY AUTPTR
+ CMPIM DOT
+ BNE #30
+ INC DOTFLG
+
+ CPYIM MAXID ;only skip if the dot could have been omitted
+ BNE #30 ;from the PW file
+
+ LDY TEMPB ;just look for "."
+ EORIY PWFPTR
+ BNE #25 ;dont adjust if it is there
+ INC TEMPB
+25 INC TEMPA ;step past in AUTPTR, not PWFPTR
+
+30 LDY TEMPA
+ CPYIM MAXID+1 ;check that we have had a dot in first 11 chars
+ BNE #10 ;** LH 24/10/85  check next match **
+
+ LDA DOTFLG
+ BEQ #60 ;should have found one by now
+ BNE #10 ;Dot found so continue
+
+40 LDAIM 0 ;FOUND IT
+42 RTS
+
+45 LDA ATWORK ;**25/12/86** looking for free slot?
+ BEQ #42 ;**25/12/86** exit with free slot in PWFPTR
+
+ ;NOW MAKE PWFPTR POINT TO THE NEXT ENTRY
+
+60 JSR APTEST ;check for end-of-window
+ BNE #65
+ JSR APEND ;check end-of-file
+ BEQ #90
+ JSR APNEXT ;get next window
+ BNE #42
+65 JMP #05
+
+90 LDAIM 0 ;**25/12/86** flush final block
+ JSR APENFL
+ BNE #42
+ LDA ATWORK ;**25/12/86** stop after first file
+ BEQ #95 ;**25/12/86** if looking for free slot
+ JMP #02 ;**25/12/86** userid not found - next drive
+
+95 LDAIM ATERRB ;**25/12/86** no free slot
+ RTS
+
+;CHEKPW: CHECK PASSWORD SUPPLIED BY THE USER WITH
+;THAT IN THE PASSWORD FILE.
+
+;ENTRY: AUTPTR = PTR TO USERID (TERMINATED CR) FOLLOWED BY PW.
+;PWFPTR = PTR TO PW FILE ENTRY.
+
+;EXIT:  A = RC
+
+CHEKPW ROUT
+ JSR STEPUR ;Step Y past userid. to password
+CHEKP1 ;Entry from SETPASSWORD (Y already set)
+ LDAIM PWPASS ;Set up offsets for PW comparison
+ STA OFF2
+
+10 LDAIY AUTPTR
+ STY OFF1
+ LDY OFF2 ;Offset into PW file
+ CPYIM PWPASS+MAXPW ;Check if reached end of pw in file
+ BEQ #20 ;If so, check that pw from AUTPTR is terminated
+
+ EORIY PWFPTR
+ INC OFF2 ;Increment PW ptr. for next time
+ LDY OFF1 ;Get offset from AUTPTR
+ INY ;Increment for next time
+ ANDIM &DF ;Complete comparison
+ BNE #30 ;Not the same -> exit with error
+
+ DEY ;Point to char. off AUTPTR
+ LDAIY AUTPTR ;The same -> check if end of string
+ INY ;Restore Y in case going back to CHEKWB
+ SEC
+ SBCIM TERMIN
+ BNE #10
+ RTS
+
+20 SEC
+ SBCIM TERMIN
+ BEQ #40 ;Both are terminators => exit with zero
+
+30 LDAIM ATERRC ;=> not found
+40 RTS
+
+STEPUR LDYIM 0
+50 LDAIY AUTPTR
+ INY
+ CMPIM TERMIN ;Move Y to point to posn. after userid
+ BNE #50 ;Not there yet
+ RTS
+
+SETAP1 ;Set pointer to callers user id
+ CLC
+ LDYIM ARGB
+ LDAIY ARGPTR
+ ADCIM UTUSID
+ STA AUTPTR
+ INY
+ LDAIY ARGPTR
+ ADCIM 0
+ STA AUTPTR+1 ;AUTPTR:=PTR TO CALLER'S USERID
+ RTS
+
+;**** Start of PW paging routines ****
+
+;start pointer := 0
+;end pointer := 0
+;current pointer := 0 ;initialisation of variables
+
+;REPEAT
+;  load window ( end pointer DIV 256, window size)
+;  End pointer+:= amount loaded
+;  Current pointer := Current pointer REM 256
+;  REPEAT
+;    perform operation (current pointer)
+;    start pointer+:= entry size
+;    current pointer+:= entry size
+;  UNTIL end pointer - start pointer < entry size OR ...
+;  IF end pointer <> start pointer THEN end pointer -:= 256
+;UNTIL end pointer >= file size OR ...
+
+;**** Initialisation of variables ****
+
+APINIT ROUT
+ LDAIM 0
+ STA STRPTR
+ STA STRPTR+1 ;start := 0
+ STA PTREND
+ STA PTREND+1 ;end := 0
+ STA PWFPTR
+ STA PWFPTR+1 ;current := 0
+ JSR RETPWF ;read the password file info
+ BEQ #20 ;first call has no window to release
+ CMPIM DRERRC ;**25/12/86** file not found?
+ BNE #20 ;continue if not
+ TAX
+ RTS ;**25/12/86** Error exit
+
+;**** Grab next chunk of PW file ****
+
+APNEXT LDAIM 0 ;flush previous block
+ JSR APENFL
+ BNE #60 ;detect error here
+20 LDAIM 1 ;Disc address -> store address
+ JSR DSCSIA ;put disc number & SIN onto NEWARG stack
+ INY
+ LDA STRPTR+1
+ STAIY NEWARG ;logical block (lo)
+ INY
+ LDAIM 0
+ STAIY NEWARG ;logical block (hi)
+
+ INY
+ SEC
+ LDA ATINF+INFSZE+1
+ SBC STRPTR+1 ;get number of blocks remaining
+ LDX ATINF+INFSZE ;**1/6/88** round up if part sector
+ BEQ #30
+ CLC
+ ADCIM 1
+ BEQ #35 ;**1/6/88** in case now 256
+30 CMPIM APWIND
+ BCC #40 ;<= window size left
+35 LDAIM APWIND
+40 STAIY NEWARG ;no of blocks (lo)
+
+ INY
+ LDAIM 0 ;no of blocks (hi)
+ STAIY NEWARG
+
+ JSR STRMAN ;do the call
+
+ PHA ;save RC
+ CLC
+ LDYIM ARGB
+ LDAIY NEWARG ;get store address
+ STA ATSTRA
+ ADC STRPTR
+ STA PWFPTR
+ INY
+ LDAIY NEWARG
+ STA ATSTRA+1 ;two bytes
+ ADCIM 0
+ STA PWFPTR+1
+
+ INY
+ LDAIY NEWARG
+ STA GENPTR
+ INY
+ LDAIY NEWARG
+ STA GENPTR+1 ;get number of blocks loaded
+
+ LDYIM CEBLKS ;from cache descriptor
+ LDAIY GENPTR
+ CLC
+ ADC STRPTR+1 ;**1/6/88**
+ STA PTREND+1 ;update PTREND by this value
+
+ PLA
+ BCC #60 ;**1/6/88** br if password file not too big
+ JSR APENFL ;**1/6/88** flush unwanted segment
+ LDAIM ATERRB ;**1/6/88** else say entry not found
+60 RTS ;return code from STRMAN
+
+;****   Update counters, test end condition   ****
+;**** Z-> end condition met ****
+
+APTEST ROUT
+ CLC
+ LDAIM PWENSZ
+ ADC STRPTR
+ STA STRPTR ;strptr+:= entry size
+ BCC #10
+ INC STRPTR+1
+
+10 CLC
+ LDAIM PWENSZ
+ ADC PWFPTR
+ STA PWFPTR ;curptr+:= entry size
+ BCC #20
+ INC PWFPTR+1
+
+20 SEC
+ LDA PTREND
+ SBC STRPTR
+ TAX ;save result
+ LDA PTREND+1
+ SBC STRPTR+1
+ BNE #30 ;not zero condition
+ TXA
+ BEQ #30 ;start=end
+ CMPIM PWENSZ
+ LDXIM &FF ;unset Z if necessary
+ BCS #30
+ LDAIM 0
+30 RTS
+
+;****  test for end of PW file ****
+
+APEND ROUT
+ LDXIM &FF
+ LDA PTREND+1
+ CMP ATINF+INFSZE+1
+ BCC #10
+ BNE #00
+ LDA PTREND
+ CMP ATINF+INFSZE
+ BCC #10
+
+00 INX
+10 TXA ;set code
+ RTS ;Z shows condition
+
+
+;**** release old window ****
+
+APENLV ROUT
+ PHA
+ LDAIM 3 ;STRMAN.unlock window
+ BNE #10 ;but leave it in cache
+
+APENFL PHA
+ LDAIM 4 ;STRMAN.flush old window
+10 JSR SETRTN
+ INY
+ LDA ATSTRA ;store address
+ STAIY NEWARG
+ INY
+ LDA ATSTRA+1
+ STAIY NEWARG
+ INY
+ LDAIM &FF
+ STAIY NEWARG ;decrement reference count (2)
+20 JSR STRMAN ;make call
+ TAX ;return the first error code
+ PLA
+ BNE #30
+ TXA
+30 RTS ;return error
+
+APENRG ROUT ;enlarge the password file
+ LDA ATINF+INFSZE+2
+ BNE #00
+ LDA ATINF+INFSZE+1 ;**1/6/88** see if maximal size already
+ CMPIM &FE ;**1/6/88** won't work if bigger than this
+ BCC #05 ;**1/6/88** because two byte offsets only used
+00 LDAIM ATERRH ;**1/6/88** password file too big
+ RTS
+
+05 LDAIM 14 ;MAPMAN.changesize without space check
+ JSR DSCSIA ;put disc number & SIN onto NEWARG stack
+ INY
+ LDAIM 0
+ STAIY NEWARG ;new size (lo)
+ CLC
+ INY
+ LDA ATINF+INFSZE+1
+ ADCIM 1
+ STAIY NEWARG ;new size (mid)
+ INY
+ LDA ATINF+INFSZE+2
+ ADCIM 0
+ STAIY NEWARG ;new size (hi)
+
+ JSR MAPMAN
+ BNE #10 ;skip if some error
+
+ LDAIM 13 ;Zero area of disc
+ JSR DSCSIA
+ INY
+ LDA ATINF+INFSZE
+ STAIY NEWARG
+ INY
+ LDA ATINF+INFSZE+1
+ STAIY NEWARG
+ INY
+ LDA ATINF+INFSZE+2
+ STAIY NEWARG
+
+ JSR MAPMAN
+ BNE #10
+
+ LDAIM 6 ;MAPMAN.ensure
+ JSR DSCSIA ;discno & sin onto NEWARG stack
+ JSR MAPMAN
+10 RTS ;leave with RC set
+
+ LNK UADE10

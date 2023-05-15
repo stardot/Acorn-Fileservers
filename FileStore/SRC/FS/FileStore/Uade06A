@@ -1,0 +1,565 @@
+ OPT UADE06 ;FILE > Uade06A
+ TTL File server file UADE06A
+
+
+;**************** USUSRS ************
+
+;ENTRY: ARGB = Start entry
+;ARGC = No. of entries
+;ARGD-E Result buffer
+;ARGF = Caller privilege flag
+;ARGG = M/C mode flag.  Zero for job/task nos, +- if not
+
+;EXIT : 
+;ARGB = No. of entries found
+;ARGC-D Result end ptr.
+
+;V. similar to examine and discs. Given entry point
+;to list of users and number of entries required,
+;supplies info. on as many as possible, returning
+;the number found and a pointer to the byte after
+;the info. for use in transmitting the data
+;out to client.
+
+
+USUSRS ROUT
+ JSR INITUS ;Set USTPTR and X
+ LDYIM ARGB
+ LDAIY ARGPTR
+ STA TEMPA ;Start entry
+ INY
+ LDAIY ARGPTR
+ STA TEMPA+1 ;No. of entries wanted
+ INY
+ LDAIY ARGPTR
+ STA GENPTR ;Result ptr.
+ INY
+ LDAIY ARGPTR
+ STA GENPTR+1
+
+ LDAIM &FF
+ STA TEMPB ;Entry pt. counter
+ STZ TEMPB+1 ;No. of entries found
+
+10 LDYIM UTPRIV
+
+;First loop round finding entries in use until
+;ENTRY = TEMPA = START ENTRY
+
+ LDAIY USTPTR
+ BPL #30 ;Not in use, don't count
+
+;** skip privileged users (27/9/84)
+;** unless caller is privileged (16/1/85)
+
+ ANDIM SYSTPV ;privileged, 
+ BEQ #20
+ LDYIM ARGF ;unless caller privileged then
+ LDAIY ARGPTR ;these "dont exist"
+ BEQ #30
+
+20 INC TEMPB ;Inc. current entry
+ LDA TEMPB
+ CMP TEMPA ;Current >= start entry ?
+ BCS #40 ;Yes => start copying to result
+
+30 JSR INCUST ;Jump to next entry
+ BNE #10 ;If not off end of table, do again
+ BRA #70 ;Otherwise, finish
+
+40 PHX
+ LDXIM 0
+ LDYIM UTMCNO
+ LDAIY USTPTR
+ STAIX GENPTR
+ INY
+ JSR INCGPT
+ LDAIY USTPTR
+ STAIX GENPTR ;Set m/c number
+ INY ;**20/5/87**
+ JSR INCGPT
+ LDAIY USTPTR 
+ LSRA ;**20/5/87** position job/task number
+ LSRA
+ LSRA
+ STAIX GENPTR ;**20/5/87** Set job/task number
+ LDYIM ARGG
+ LDAIY ARGPTR
+ BNE #45 ;**20/5/87** Skip increment if not wanted
+ JSR INCGPT
+45 LDYIM UTUSID ;User id. offset
+50 LDAIY USTPTR
+ STAIX GENPTR
+ JSR INCGPT
+ CMPIM CR ;Is terminated ??
+ BEQ #60
+
+ INY
+ CPYIM UTUSID+MAXUNM ;Finished ?
+ BNE #50 ;**23/4/85**
+ LDAIM CR ;**16/1/85**
+ STAIX GENPTR
+ JSR INCGPT
+
+60 LDYIM UTPRIV ;Get privilege byte
+ LDAIY USTPTR
+ ANDIM SYSTPV ; +LOPRIV ;**25/5/86 + 31/10/86**
+ STAIX GENPTR
+ JSR INCGPT ;Point to next entry
+ PLX ;Restore table entry count
+
+ INC TEMPB+1 ;Inc. no. found
+ LDA TEMPA+1
+ CMP TEMPB+1 ;No. found = no. requested ?
+ BEQ #70 ;Yes => stop
+
+ JSR INCUST ;Step through table
+ BNE #10 ;Do again
+
+70 LDYIM ARGB
+ LDA TEMPB+1
+ STAIY ARGPTR
+ INY
+ LDA GENPTR
+ STAIY ARGPTR
+ INY
+ LDA GENPTR+1
+ STAIY ARGPTR
+ LDAIM 0
+ JMP USEXIT
+
+
+;*******************
+
+USQUIT ROUT
+ JSR INITUS ;setup USTPTR
+10 LDYIM UTPRIV ;scan for inuse entries
+ LDAIY USTPTR
+ BEQ #20
+ PHX ;preserve X over LOGOFF call
+ JSR USENS ;ensure all free space entries up to date
+ PLX
+20 JSR INCUST
+ BNE #10
+ JMP USEXIT ;end of routine
+
+
+USFREE ROUT ;** 6/2/85 **
+
+ LDA USTPTR
+ PHA
+ LDA USTPTR+1
+ PHA ;save this value over call
+
+ JSR INITUS ;update all incarnations of a user free space
+ STX USTEMP ;save counter
+ 
+10 LDYIM ARGB
+ LDAIY ARGPTR
+ STA GENPTR
+ INY
+ LDAIY ARGPTR
+ STA GENPTR+1 ;pointer to supplied name
+
+ LDYIM UTPRIV
+ LDAIY USTPTR
+ BPL #50 ;not in use so skip
+
+ LDXIM 0
+ LDYIM UTUSID
+20 LDAIY USTPTR
+ EORIX GENPTR
+ ANDIM &DF
+ BNE #50
+ LDAIY USTPTR
+ CMPIM TERMIN
+ BEQ #40 ;end of name
+
+ INC GENPTR
+ BNE #30
+ INC GENPTR+1
+
+30 INY
+ CPYIM MAXID+UTUSID+1
+ BNE #20 ;continue
+
+40 LDAIM ARGD ;update the free space
+ STA OFF1
+ LDXIM ARGPTR
+ LDAIM UTFREE
+ STA OFF2
+ LDYIM USTPTR
+ LDAIM 4 ;arguments supplied on stack
+ JSR MOVBLK
+
+50 JSR INCUST
+ DEC USTEMP
+ BNE #10 ;not end of table
+
+ PLA
+ STA USTPTR+1
+ PLA
+ STA USTPTR
+
+ LDAIM 0
+ JMP USEXIT
+
+;**************** USDALL ****************
+
+;ENTRY: none
+
+;EXIT: none
+
+;USES: USTPTR
+
+;All logged on users are logged off.
+
+USDALL ROUT
+ JSR INITUS ;Set up to scan all users
+ LDAIM 0 ;Assume return code
+ PHA
+10 LDYIM UTPRIV
+ LDAIY USTPTR ;See if slot in use
+ BPL #20
+ PLA ;Current worst return code
+ PHX ;Save index
+ JSR LOGOFF ;Logoff this machine
+ PLX ;Reload index
+ PHA ;Save new worst return code
+20 JSR INCUST ;Attempt to logoff all users
+ BNE #10
+ PLA ;Return code
+ JMP USEXIT
+
+
+
+SETUTP LDYIM ARGB ;SETUP USTPTR
+ LDAIY ARGPTR
+ STA USTPTR
+ INY
+ LDAIY ARGPTR
+ STA USTPTR+1
+ RTS
+
+
+CHKMC LDYIM ARGB ;SEE IF MACHINE LOGGED ON
+ LDAIY ARGPTR
+ STA MCNUMB ;N.B. USE MCTEMP BECAUSE MCNUMB IS USED GLOBALLY
+ STA MCTEMP ;=LS(MC/NO)
+ INY
+ LDAIY ARGPTR
+ STA MCNUMB+1
+ STA MCTEMP+1 ;=CS(MC/NO)
+ INY
+ LDAIY ARGPTR ;**25/2/86**
+ STA MCNUMB+2
+ STA MCTEMP+2 ;=MS(MC/NO)
+ JMP FINDMC
+
+
+RETRV ROUT
+ LDYIM ARGH ;A passed in call
+ STAIY NEWARG ;wild card flag
+
+ LDAIM 2 ;DIRMAN.RETRIEVE
+ JSR SETUSA ;MOVE USTPTR ONTO NEWARG STACK
+ INY
+ LDA TITPTR
+ STAIY NEWARG ;ARGD
+ INY
+ LDA TITPTR+1
+ STAIY NEWARG ;PTR TO DIR NAME
+ INY
+ LDAIM :LSB:USRINF
+ STAIY NEWARG
+ INY
+ LDAIM :MSB:USRINF ;ADDRESS OF DETAILS AREA
+ STAIY NEWARG
+ JSR DIRMAN
+ BNE #20
+ LDYIM ARGB
+ LDAIY NEWARG
+ STA USRACC ;USRACC:=ACCESS TO OBJECT
+ ANDIM TYPDIR
+ BNE #10
+ LDAIM URERRD ;RC:=OBJECT NOT A DIR
+ RTS
+
+10 LDAIM 0 ;RC := 0
+20 RTS
+
+
+SETUID ROUT
+ LDYIM UTUSID ;Copy userid from USERTB to USRUFD
+10 LDAIY USTPTR ;Copies all chars regardless of termination
+ STAAY USRUFD-UTUSID
+ INY
+ CPYIM UTUSID+MAXUNM
+ BNE #10
+ RTS
+
+
+MAKHDS ROUT
+ JSR OPEN ;MAKE HANDLES FOR UFD & SELECTED DIR
+ BNE #20
+
+ STA UMHUFD ;make this the handle for the UFD
+ [ Pseudods = Yes
+ LDYIM UTHUFD ;**26/6/87** and store in user table
+ STAIY USTPTR
+ ]
+
+ JSR OPEN ;now get a handle for selected dir 
+ BEQ #10
+ PHA
+ JSR CLUFDR ;CLOSE UFD
+ PLA
+ RTS
+
+10 STA UMHCSD
+ LDAIM 0
+20 RTS
+
+
+
+OPEN ROUT
+ LDAIM 1 ;CALL RNDMAN.OPEN FOR DIR IN USRINF
+ JSR SETUSA ;COPY USTPTR ONTO NEWARG STACK
+ INY
+ LDAIM 0 ;MODE := 0
+ STAIY NEWARG
+ INY ;Y:=E
+ LDA USRACC
+ STAIY NEWARG
+ INY ;Y:=ARGF
+ LDAIM :LSB:USRINF
+ STAIY NEWARG
+ INY
+ LDAIM :MSB:USRINF
+ STAIY NEWARG ;PTR TO OBJECT DETAILS
+ JSR RNDMAN
+ BNE #10
+ LDYIM ARGB
+ LDAIY NEWARG
+ LDYIM 0
+10 RTS
+
+; SETUSA: Move Arg, USTPTR onto NEWARG stack
+; SETUSR: Move just USTPTR onto NEWARG stack
+; Exit:   Y=ARGC
+
+SETUSA ROUT ;Move Arg in A onto NEWARG stack **25/12/86**
+ JSR SETRTN
+SETUSR LDYIM ARGB ;MOVE USTPTR ONTO NEWARG STACK
+ LDA USTPTR
+ STAIY NEWARG
+ INY
+ LDA USTPTR+1
+ STAIY NEWARG
+ RTS
+
+
+;LOGOFF: CLOSE ALL HANDLES OPENED BY M/C & FREE USERTB ENTRY
+;Return code as entered, or replaced by any LOGOFF error code
+
+LOGOFF ROUT
+ PHA
+ LDAIM 6
+ JSR SETUSA
+ JSR RNDMAN ;*** CLOSE ALL ENTRIES **
+ BEQ #10
+ PLY ;**1/6/88** stack bad return code
+ PHA
+
+;NOW CLEAR USERTB ENTRY TO ZERO
+
+10 JSR USENS ;update all free space entries
+ BEQ #20
+ PLY ;**1/6/88** stack bad return code **
+ PHA
+20 LDYIM UTPRIV ;check for priv'd user
+ LDAIY USTPTR ;** 27/9/84 **
+ ANDIM SYSTPV
+ BEQ #30 ;not priv'd
+ DEC USSYS ;decrement counter
+30 LDAIM 0
+ LDYIM UTENSZ-1 ;**1/6/88**
+40 STAIY USTPTR
+ DEY
+ BPL #40
+ PLA
+ RTS
+
+
+USENS CLC ;** 2/10/84 **
+ LDYIM ARGD
+ LDA USTPTR
+ ADCIM :LSB:UTUSID
+ STAIY NEWARG ;nb ARGB,C unused here
+
+ INY
+ LDA USTPTR+1
+ ADCIM :MSB:UTUSID
+ STAIY NEWARG
+
+ LDAIM UTFREE
+ STA OFF1
+ LDAIM ARGF
+ STA OFF2
+ LDXIM USTPTR
+ LDYIM NEWARG
+ LDAIM UTFRLN
+ JSR MOVBLK
+
+ LDAIM 8 ;ensure free store in PW file
+ JSR SETRTN
+ JMP AUTMAN
+
+
+CLOSE PHA
+ LDAIM 3 ;RNDMAN.CLOSE
+ JSR SETUSA ;PLACE PTR TO USERINFO ON NEWARG STACK
+ INY
+ PLA
+ STAIY NEWARG ;**25/12/86**
+ JMP RNDMAN
+
+
+CLUFDR ROUT
+ LDA UMHUFD ;CLOSE UFD
+ BEQ #10
+ JSR CLOSE
+ STZ UMHUFD
+10 RTS
+
+
+CLSLDR LDA UMHCSD
+ BEQ #10
+ JSR CLOSE
+ STZ UMHCSD
+10 RTS
+
+
+;GETUFD: SEE IF THERE IS A UFD IN THE ROOT DIR ON
+;CURRENTLY SELECTED DISC.
+;IF THERE IS A UFD THEN MAKE HANDLES FOR
+;THE UFD & THE CURRENTLY SELCECTED DIRECTORY.
+;ALSO SEARCH FOR LIB. IF FOUND, GET HANDLE
+;FOR IT, IF NOT LIB:=CSD/UFD
+
+;EXIT: A := RC
+
+
+GETUFD ROUT
+ JSR SETUID ;COPY USERID INTO USRUFD
+ LDAIM TERMIN
+ STA USRTER
+ LDAIM SEPART
+ JSR #20 ;**7/7/88** complete name & retrieve
+ BNE #10
+ LDAIM OWNER
+ TSB USRACC ;OWNER ACCESS TO UFD
+ BRA #00 ;Common code
+
+GTROOT JSR RTROOT
+ BNE #10
+00 JSR MAKHDS ;MAKE HANDLES
+ BNE #10
+ JSR GETLBH ;LOOK FOR LIB FILE
+10 RTS
+
+RTROOT LDAIM TERMIN
+20 STA USRSEP
+ LDAIM ROOT
+ STA USRROT
+ LDAIM :LSB:USRROT
+ STA TITPTR
+ LDAIM :MSB:USRROT
+ STA TITPTR+1
+ LDAIM 0 ;no wild cards here
+ JMP RETRV ;RETRIEVE ROOT DIR
+
+
+
+;TRY TO RETRIEVE FILE "LIBRARY".
+;IF FOUND, OPEN AND PUT HANDLE
+;IN LIB. LOCATION. IF NOT, OPEN
+;ROOT, WHICH WILL BE LIBRARY
+
+;** 15/9/83 **
+
+GETLBH ROUT
+ LDYIM UTDISC
+ LDAIY USTPTR
+ STA USDISC ;**7/7/88**
+ INY
+ LDAIY USTPTR
+ STA USDISC+1 ;save users disc number
+
+ STZ UMHLIB ;spare counter
+10 LDA UMHLIB
+ JSR DRVINF ;drive exists ?
+ BNE #20 ;no
+ JSR SUSRDI
+
+ LDAIM :LSB:DEFLIB ;PTR. TO LIB. TITLE
+ STA TITPTR
+ LDAIM :MSB:DEFLIB
+ STA TITPTR+1
+
+ LDAIM 0 ;no wild cards here
+ JSR RETRV
+
+ BEQ #30 ;OK, FOUND SO OPEN
+ CMPIM DRERRC
+ BNE #50 ;IF ERROR NOT "NOT FOUND", ABORT
+
+20 INC UMHLIB
+ LDA UMHLIB ;**14/06/86**
+ CMP DRIVES ;**14/06/86**
+ BCC #10 ;loop until all drives tried
+
+;Now retrieve root. Then open and return
+;handle for lib.
+
+ JSR #40 ;**7/7/88** must reset drive first
+ JSR RTROOT ; retrieve
+ BNE #50
+
+30 JSR OPEN
+ BNE #50 ;ABORT IF ERROR
+ STA UMHLIB ;STORE HANDLE
+ LDAIM 0 ;GIVE Z SET
+
+40 TAX
+ LDYIM UTDISC+1 ;restore the old values
+ LDA USDISC+1
+ STAIY USTPTR
+ DEY
+ LDA USDISC
+ STAIY USTPTR
+ TXA ;restore return code
+ RTS
+
+50 PHA
+ JSR CLUFDR
+ JSR CLSLDR
+ PLA
+ BRA #40
+
+DEFLIB = "$.library",CR
+
+MOVHND ROUT
+ PHA
+ INY
+ INY
+ LDXIM 2
+10 LDAAX UMHUFD
+ STAIY ARGPTR
+ DEY
+ DEX
+ BPL #10
+ PLA
+ RTS
+
+ LNK RMAN01

@@ -1,0 +1,488 @@
+ OPT 1 ; > <FileStoreMOSSource>.DOS02
+ TTL File server file DOS02
+
+
+; Hard Drive
+
+; -------------------------------------------------------------------------------
+; Issue SCSI Command to Hard Drive, with 10 RETRYS
+;
+; On Entry:
+;    DISCCB/DISCCB+1 point to the control block containing the SCSI command
+;
+; This wrapper is responsible for the retry logic if there are errors
+;
+; The SCSI command is passed to HDCMD, and this is where most of the work happens
+
+
+HDOSW72 ROUT
+ LDAIM &A          ; 10 RETRYS (for recoveable errors)
+ STA RETRYS        ; store in the retry counter
+ LDAIM &53
+ STA HDDATA
+ STZ HDIRQ         ; disable HD IRQ
+ CMP HDDATA
+ BNE #10
+
+ LDAIM &A5
+ STA HDDATA
+ STZ HDIRQ         ; disable HD IRQ
+ CMP HDDATA
+ BEQ #30
+
+; Otherwise the SCSI interface is broken, return BAD DRIVE
+
+10
+ LDAIM DRERRH      ; BAD DRIVE
+20
+ JMP OW72XX        ; return from OSWORD &72 with return code in A
+
+30
+ JSR HDCMD        ; Issue SCSI command (running through the different bus phases)
+ BEQ #20           ; Z=1 indicates success
+ CMPIM &25         ; &25 = ASC (additional sense code) &25 = LOGICAL UNIT NOT SUPPORTED
+ BEQ #10           ; return BAD DRIVE error code
+ CMPIM &65         ; &65 = set if drive could not be selected
+ BEQ #10           ; return BAD DRIVE error code
+ CMPIM 4           ; &04 = ASC (additional sense code) &04 = LOGICAL UNIT NOT READY
+ BNE #50           ; if not, then retry immediately
+ LDYIM &19         ; delay &190000 x 12 cycles @ 2MHz = 9.83s for the unit to be reads
+40
+ PHA               ; 3 cycles
+ PLA               ; 4 cycles
+ DECA              ; 2 cycles
+ BNE #40           ; 3 cycles
+ DEX
+ BNE #40
+ DEY
+ BNE #40
+ LDAIM 4
+50
+ DEC RETRYS        ; decrement the retry counter
+ BPL #30           ; if >= 0 then retry command
+ BRA #20           ; exit OSWORD
+
+; -------------------------------------------------------------------------------
+; Issue SCSI Command to Hard Drive
+;
+; This routine runs through the phases of a SCSI transfer:
+; - selection phase:  selects the target device (based on the drive number)
+; - command phase:    sends the command from the control block to the target
+; - data phase:       transfers data blocks between the target and initiator
+; - status phase:     reads the status code from the target
+; - message-in phase: checks for the COMMAND_COMPLETE message from the target
+;
+; In addition, if the status code is CHECK_CONDITION (02), then a REQUEST SENSE
+; command is issued to retrieve additional SENSE DATA about the error.
+;
+; On Entry:
+;    DISCCB/DISCCB+1 point to the control block containing the SCSI command
+;
+; On Exit:
+;    A = the status code
+;    Z = 1 and A =  00 indicates success
+;    Z = 0 and A /= 00 indicates failure
+
+HDCMD ROUT
+ JSR HDSLCT        ; select drive
+ INY               ; Y=1
+ LDAIY DISCCB      ; read LSB of buffer address (Addr0)
+ STA BUFLEN        ; store in ZP
+ INY               ; Y = 2
+ LDAIY DISCCB      ; read MSB of buffer address (Addr1)
+ STA BUFLEN+1      
+ LDYIM 5           ; Y = 5
+ LDAIY DISCCB      ; read SCSI command byte from control block
+ JSR HDXFER        ; transfer command byte
+ INY               ; Y = 6
+ LDAIY DISCCB      ; Drive / Sector
+ ANDIM &1F
+ BRA #20
+10
+ INY               ; increment the control block index
+ LDAIY DISCCB      ; and read the next command byte from the control block
+20
+ JSR HDXFER        ; output A to the target (sending the multi-byte SCSI command)
+ JSR HDWAIT        ; wait for the target to assert REQ*
+ BPL #30           ; N=0 indicates we are should move to the data phase
+ BVC #10           ; V=0 indicates more command bytes are expected
+
+30                 ; we are now in the data phase
+ LDYIM 5
+ LDAIY DISCCB      ; re-read the command byte
+ ANDIM &FD         ; 11111101
+ EORIM &8          ; 00001000
+ BEQ #70           ; branch if commands 08/0A (READ6/WRITE6)
+
+; transfer code for other commands (like format)
+; each byte of the transfer is paced using REQ* which is slow
+
+ JSR HDWAIT        ; wait for the target to assert REQ*
+ CLC
+ BVC #40           ; copy V to C - i.e. remember the transfer direction
+ SEC
+40
+ LDYIM 0           ; set the buffer index to zero
+50
+ JSR HDWAIT        ; wait for the target to assert REQ*
+ BMI HDSTPH        ; N=1 indicates the data phase has ended
+ BCS #60           ; C=1 indicates reads
+ LDAIY BUFLEN      ;
+ STA HDDATA        ; transfer a byte from buffer -> target (i.e. a SCSI write)
+ BRA #65
+60
+ LDA HDDATA
+ STAIY BUFLEN      ; transfer a byte from target -> buffer (i.e. a SCSI read)
+65
+ INY               ; increment the buffer index
+ BNE #50           ; loop back if fewer than 256 bytes have been transferred
+ INC BUFLEN+1      ; increment the high byte of the buffer pointer
+ BRA #50           ; loop back always (transfer ends when the target ends the data phase)
+
+; transfer code for commands 08/0A/28/2A (READ6/WRITE6/READ10/WRITE10)
+; the transfer is done as fast as possible (one byte every 7us) without checking REQ*
+70
+ LDYIM 0           ; set the buffer index to zero
+ LDA BUFLEN+1
+ BEQ #90
+80
+ JSR HDRDST        ; read the hard drive status register (into A and HDSR  )
+ ANDIM &20
+ BEQ #80
+ BIT HDSR
+ BMI HDSTPH        ; N=1 indicates the data phase has ended
+ BVS #84           ; V=1 indicates reads
+82
+ LDAIY BUFLEN      ; transfer a byte from buffer -> target (i.e. a SCSI write)
+ STA HDDATA
+ INY               ; increment the buffer index
+ BNE #82           ; loop back if fewer than 256 bytes have been transferred
+ INC BUFLEN+1      ; increment the high byte of the buffer pointer
+ BRA #80           ; loop back always (transfer ends when the target ends the data phase)
+84
+ LDA HDDATA        ; transfer a byte from target -> buffer (i.e. a SCSI read)
+ STAIY BUFLEN
+ INY               ; increment the buffer index
+ BNE #84           ; loop back if fewer than 256 bytes have been transferred
+ INC BUFLEN+1      ; increment the high byte of the buffer pointer
+ BRA #80           ; loop back always (transfer ends when the target ends the data phase)
+90
+ JSR HDRDST
+ ANDIM &20
+ BEQ #90
+ BIT HDSR
+ BMI HDSTPH
+ BVS #84
+ STZ HDDATA
+ BRA #90
+ 
+; -------------------------------------------------------------------------------
+; Transfer one command byte to the target (i.e. in the SCSI command phase)
+;
+; The bus should in an output direction, and error recovery code will be involked
+; if this is not the case.
+;
+; On Entry:
+;   A = byte to transfer
+
+
+HDXFER ROUT
+ JSR HDWAIT        ; wait for the target to assert REQ*
+ BVS #20           ; V=1 is an error case (the bus direction should be output)
+ STA HDDATA        ; write the command (in A) to the bus
+ PHP
+ LDAIM &40         ; delay for 64 * 5 cycles @ 2MHz = 160us
+10
+ DECA              ; 2 cycles
+ BNE #10           ; 3 cycles
+ PLP
+ LDAIM 0           ; A=0
+ RTS               ; return
+
+20                 ; V = 1 indicates the bus direction is input, but it should be output
+ PLA               ; i.e. the bus is in an unexpected state...
+ PLA               ; unstack an address so next RTS will return to rtFA1E
+                   ; then fall through to the SCSI status phase code
+
+; handle the SCSI status phase
+;
+; (it looks like this code expects the status byte to be followed
+; by a COMMAND COMPLETE message)
+
+HDSTPH
+ JSR HDWAIT        ; wait for the target to assert REQ* (or de-assert BSY*)
+ LDA HDDATA        ; read the SCSI status code
+ NOP
+ NOP
+ JSR HDWAIT        ; wait for the target to assert REQ* (or de-assert BSY*)
+ TAY               ; save SCSI status code in Y
+ JSR HDRDST        ; read the hard drive status register (into A and HDSR  )
+ ANDIM 2
+ BEQ #45
+ LDA HDSR
+ ANDIM 1           ; test bit 0
+ BEQ HDSTPH        ; if 0 check again  
+ TYA               ; get the SCSI status code back in A
+ LDX HDData        ; read the first byte of the message
+ BNE #45
+ TAX
+ ANDIM &F
+ CMPIM 2
+ BEQ #50
+ TXA               
+40
+ ANDIM &7F         ; status code in A
+ RTS               ; return
+45
+ LDAIM &FF
+ BRA #40
+50
+ LDXIM 0
+52
+ DEX
+ BNE #52
+ JSR HDSLCT
+ LDAIM 3
+ JSR HDXFER
+ JSR HDXFER
+ JSR HDXFER
+ JSR HDXFER
+ LDAIM &D
+ JSR HDXFER
+ JSR HDXFER
+ TAX
+55
+ JSR HDWAIT
+ BMI #70
+ LDA HDDATA
+ CPXIM 7
+ BCC #60
+ CPXIM &C
+ BNE #65
+ LDXIM 0
+ CMPIM 0
+ BNE #60
+ LDA DISCCB+4
+60
+ STAAX DISCCB+2
+65
+ INX
+ BRA #55
+70
+ LDYIM 6           ; byte for drive number in the CB
+ LDAIY DISCCB
+ ANDIM &E0         ; mask drive number from sector
+ TSB DISCCB+3
+ JSR HDWAIT
+ LDX DISCCB+2
+ LDA HDDATA
+ JSR HDWAIT
+ LDY HDDATA
+ BNE #45
+ ANDIM 2
+ BNE #45
+ TXA
+ BRA #40
+; -------------------------------------------------------------------------------
+; Select Drive
+;
+; On entry:
+;     drive number is read from the control block
+;
+; On exit:
+;     If the drive is successfully selected
+;        Y = 0
+;     If the drive is not selected within ~6ms
+;        A = &65
+;        control is returned to the caller's caller (always HDOSW72)
+
+HDSLCT ROUT
+ LDYIM 6           ; byte for drive / sector in CB
+ LDAIY DISCCB
+ LSRA              ; set the top 3 bits with the drive number
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ TAY
+ LDAAY DRVTAB
+ PHA
+10
+ JSR HDRDST        ; read the hard drive status register (into A and HDSR  )
+ ANDIM 2           ; test bit 1, the BSY* bit
+ BEQ #20
+ BIT HDDATA
+ BRA #10
+ 
+20
+ PLA               ; A=1
+ STA HDDATA        ; write it to the SCSI data register
+ STA HDSEL         ; write it to the SCSI select register
+ LDYIM 0
+30
+ JSR HDRDST        ; read the hard drive status register (into A and HDSR  ) (35 cycles)
+ ANDIM 2           ; test bit 1, the BSY* bit                                ( 2 cycles)
+ BEQ #40           ; BSY*=0 indicates the bus is still in the free phase     ( 3 cycles)
+                   ; BSY*=1 indicates the device has been selected
+ LDYIM 0           
+ RTS               ; return with Y=0
+ 
+40
+ DEY
+ BNE #30
+ PLA
+ PLA
+ LDAIM &65
+ RTS
+
+DRVTAB
+ = &1, &2, &4, &8
+ 
+ 
+; -------------------------------------------------------------------------------
+; Read Hard Drive Status Register
+
+HDRDST ROUT
+ PHP                ; save the flags
+10
+ LDA HDSTAT         ; read the hard drive status register
+ STA HDSR           ; store it in HDSR  
+ LDA HDSTAT         ; re-read the hard drive status register
+ CMP HDSR           ; compare against previous value
+ BNE #10            ; loop back if changed
+ PLP                ; restore the flags
+ RTS
+
+; -------------------------------------------------------------------------------
+; Wait for the SCSI target to assert REQ* or de-assert BSY*
+;
+; All information transfer (command, data or status) over the data bus
+; between the initiator and target is controlled by the target. The
+; target transfers one byte at a time using handshaking with the REQ*
+; and ACK* lines.
+;
+; The target asserts REQ* to start a transfer and the initiator
+; responds with ACK* to acknowledge the transfer. On transfers from
+; the target to the initiator the target asserts the data before
+; asserting REQ* and waits until ACK* is asserted before sending the
+; next byte. On transfers from the initiator to the target the target
+; asserts REQ* and waits until ACK* is asserted before reading the
+; data from the bus.
+;
+; On exit:
+;   N is the control/data status bit
+;      N = 0 indicates the target expects data information to be transferred
+;      N = 1 indicates the target expects control information to be transferred
+;
+;   V is the input/output status bit
+;      V = 0 indicates the target expects the initiator to do an output operation
+;      V = 1 indicates the target expects the initiator to do an input operation
+;
+; Note: an asserted SCSI signal is seen as a '1' in the status register
+; because the signals are passed through inverting buffers.
+
+HDWAIT ROUT
+ PHA               ; save A
+10
+ JSR HDRDST        ; read the hard drive status register (into A and HDSR  )
+ ANDIM &20         ; test bit 5, the REQ* bit, which is driven by the target
+ BNE #20           ; if REQ* isn't asserted, then read again
+ LDA HDSR
+ ANDIM 2
+ BNE #10
+20
+ PLA               ; restore A
+ BIT HDSR          ; test the caches status register
+ RTS               ; return with N=command/data status bit and V=input/output status bit
+
+ [ DEBUG = TRUE
+ 
+; Read floppy disk track
+
+FDRDTK ROUT
+ CLI
+ LDAIM 0           ; select drive 0
+ STA DRIVE
+ JSR FDSWTR        ; Select Floppy Drive and Write Track register
+10
+ LDYIM 0           ; delay counter
+ LDA DBTRCK        ; track number
+ STA FDCD          ; write FDC data register
+ LDX DRIVE         ; X = drive number (0 or 1)
+ STAAX DxTRCK      ; store updated track number
+ LDAIM &1C         ; FDC command &1C - Seek (and load head and verify track num)
+20
+ STA FDCC          ; write FDC command register
+
+30                 ; delay for 256 * 5 cycles & 2MHz = 640us
+ DEY               ; 2 cycles
+ BNE #30           ; 3 cycles
+
+40
+ LDA FDCS          ; read the FDC status register
+ RORA              ; shift bit 0 (BUSY) into carry
+ BCS #40           ; loop back if BUSY (i.e. wait for the idle state)
+ 
+ ROLA              ; undo the ROR A
+ STA HDSR      
+ 
+ BITIM &10         ; test bit 4 = RECORD NOT FOUND
+ BEQ #50
+ LDAIM 8           ; replace with A = Restore FDC Command (==return to track 0)
+ BRA #20
+
+50
+ LDA DBTRCK        ; track number
+ CMP FDCTRK        ; compare with FDC track register, was successful?
+ BNE #10           ; if not, try again
+ 
+ LDAIM &A0         ; memory location &A000
+ STA #80+2         ; to store data
+ LDXIM :LSB:#75    ; read data routine
+ LDYIM :MSB:#75
+ JSR FDNEWI        ; set the NMI vector from X/Y
+ LDXIM 0
+ LDYIM 3
+ LDAIM &E0         ; FDC Command &E0 = Read Track
+ STA FDCC
+
+60
+ TYA               ; A=3
+ BNE #60
+ 
+ LDA FDCC
+ STA HDSR  
+ BIT FDCD          ; read and discard the data register
+ LDAIM &D0         ; FDC Command &D0 = Force Interrupt
+ STA FDCC          ; Write FDC command register
+70
+ INCA              ; wait ~125us
+ BNE #70
+ JMP FDDEFI        ; Reset NMI to the default NMI handler (INT) 
+
+; replacement interrupt routine for reading a track
+; and place at &A000
+75
+ LDA FDCD          ; read FDC data register
+80
+ STAAX &A000       ; store data at &A0xx
+ INX               ; all data read
+ BNE #90             
+ INC #80+2         ; increment the memory storage location
+90
+ LDA FDCS          ; read FDC status register
+ RORA              ; C = bit 0 (BUSY)
+ BCC #95           ; not busy, so proceed
+ RTI
+95
+ LDA FDCD          ; read FDC data register
+ LDYIM 0
+ RTI
+ ]
+ 
+ 
+FILL 
+ xFILL &FF,&FC00-FILL ; fill to end of page with &FF
+
+
+ LNK MOS06

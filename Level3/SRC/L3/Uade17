@@ -1,0 +1,1070 @@
+ OPT  UADE17 ;FILE > Uade17
+ TTL File server file UADE17
+
+;INFO/LOGON/PRIV. OPERATIONS ETC.
+
+
+;Get info in m/c readable format, depending on
+;argument.
+
+;1 = creation date
+;2 = load/execution addresses
+;3 = size
+;4 = type/access
+;5 = all above 4 in order load/execute/size/access/date
+;
+;6 = get access, cycle (sequence) number, and last
+;    component of dir. title for dir. name. NOTE
+;    does not use retrieve, and does not trap "NOT
+;    FOUND" error.
+
+CPINFO ROUT
+ JSR GETUSE
+ BNE #50
+
+ LDX BPTR
+ LDAAX MIDRX
+ BEQ #05 ;Zero arg => error
+ CMPIM 6
+ BEQ #70 ;=> do directory information
+ BCC #10 ;Otherwise, is valid arg.
+
+05 LDAIM INFERA
+ BNE #60 ;Abort with err. msg.
+
+10 LDAIM 0
+ STA MIDTX ;Set existence flag to "does not exist"
+ LDAIM INFFTO
+ JSR CPRETR ;Retrieve details
+ BEQ #15 ;Ok, continue
+ CMPIM DRERRC ;If not found, alter existence flag
+ BNE #60 ;Not "not found" => error
+ LDXIM 1 ;Length of reply
+ BNE #45 ;Exit, sending reply
+
+15 INC MIDTX ;Set flag to "is a file"
+ LDX BPTR
+ LDAAX MIDRX ;Check arg.
+ LDXIM 1 ;Offset for COCOPY
+ CMPIM 5 ;Is "all args" ?
+ BNE #20 ;Nope, continue
+
+ JSR CPYLXS ;Yep, copy all args
+ BEQ #30 ;Always jump
+
+20 JSR COCOPY ;Copy relevant amount of stuff COWORK->MIDTX
+
+30 LDYIM ARGB ;check for OWNER/PUBLIC
+ LDAIY NEWARG
+ ANDIM OWNER
+ BEQ #35
+ LDAIM &FF
+35 EORIM &FF ;invert byte [Owner => 0]
+ STAAX MIDTX ;put this at the end of the information
+ INX
+
+40 LDYIM INFACC
+ LDAAY COWORK
+ ANDIM TYPDIR ;Check if is a directory
+ BEQ #45 ;Is not -> continue
+ INC MIDTX ;Is => set flag to 2 => directory
+45 TXA ;Length of information transfered
+ JMP Datous ;Go send msg
+
+50 JMP COMRTS
+
+60 JMP ERROR
+
+70 JSR STKUSA ;Set user info. on stack
+ LDAIM 3
+ STA COZERO ;Offset for dir. name result
+ LDAIM HDRLEN+1 ;Offset of dir. name arg.
+ LDXIM &C1 ;force directory here
+ JSR DIRIN2 ;Get dir. infomation
+ BNE #60
+
+ LDYIM ARGD ;Now set access & sequence number
+ LDAIM 0
+ STA MIDTX+NAMLNT+3 ;Zero => owner, $FF => public
+ STA MIDTX+1
+ LDAIM OWNER
+ ANDIY NEWARG ;Check access to dir.
+ BNE #80 ;Is owner, continue
+ DEC MIDTX+NAMLNT+3 ;Otherwise, give $FF
+80 INY
+ LDAIY NEWARG
+ STA MIDTX+NAMLNT+4 ;Set sequence number of dir.
+ LDAIM NAMLNT
+ STA MIDTX+2 ;Set length of dir. name
+ LDXIM NAMLNT+5 ;Length of message - TXHDR
+ BNE #40 ;Exit with reply (Note MIDTX undefined)
+
+CPIXTB = 2 ;Table of length of data
+ = 8
+ = 3
+ = 1
+
+CPIATB = INFDTE  ;Offset of data in COWORK
+ = INFLOA
+ = INFSZE
+ = INFACC
+
+
+;Copy load/exec/size/access/date into MIDTX
+
+CPYLXS ROUT
+ LDAIM 2
+ JSR COCOPY ;Load/exec
+ LDAIM 3
+ JSR COCOPY ;Size
+ LDAIM 4
+ JSR COCOPY ;access
+ LDAIM 1 ;creation date
+
+;Fall through into last call of COCOPY
+
+COCOPY
+
+;Copy some object attribute from COWORK into MIDTX
+;offset by X. Attribute length and value is determined
+;by A on entry which indexes into two tables
+
+ TAY
+ LDAAY CPIXTB-1
+ STA COTEMP ;Set length to copy
+ LDAAY CPIATB-1
+ TAY ;Get offset in COWORK
+10 LDAAY COWORK
+ STAAX MIDTX
+ INY
+ INX
+ DEC COTEMP
+ BNE #10
+ RTS ;Note assumed elsewhere always exit EQ
+
+
+
+
+;Set object attributes according to arg.
+
+;1 => set load/execute/access
+;2 => set load address
+;3 => set execute address
+;4 => set access byte
+;5 => set date bytes ** 5/9/84 **
+
+;Basically just a call to DIRMAN.SETATTRIBS
+
+CPSTAT ROUT
+ JSR STKUSE
+ BNE #50
+
+ LDX BPTR
+ LDAAX MIDRX
+ BEQ #10
+ CMPIM 6 ;** 5/9/84 **
+ BCC #20 ;Arg ok, continue
+
+10 LDAIM INFERA ;Error in arg.
+ JMP ERROR
+
+20 TAY
+ LDAAY DRSAT2-1 ;Note uses table in DIRMAN to get data length
+ BEQ #40 ;If setting zero number of bytes, exit
+
+ CLC
+ ADCIM HDRLEN+1 ;Get offset of file title in RX buffer
+ LDYIM ARGC
+ JSR SETFTP ;Set pointer to file title
+
+ INY ;ARGF here
+ LDAIM &C0
+ STAIY NEWARG ;wild card flag
+
+ LDX BPTR
+30 INY
+ LDAAX MIDRX ;Load arg. to DIRMAN.SETATTRIBS
+ STAIY NEWARG
+ INX
+ CPYIM ARGH+9
+ BNE #30
+
+;Stack now all set, call DIRMAN.SETATTRIBS
+
+ LDAIM 4
+ JSR SETRTN
+ JSR DIRMAN
+40 JSR RCODE
+50 JMP COMRTS
+
+
+;Non-command line call to delete object, and return
+;object information after deletion.
+
+CPDEL ROUT
+ JSR STKUSE
+ BNE #20
+ LDAIM HDRLEN ;Offset of file title
+ JSR CPRETR ;Retrieve details of object to delete
+ BNE #10 ;No good, error
+
+ JSR STKUSA ;Reset user pointer on stack
+ LDAIM HDRLEN ;File title offset
+ JSR SETFTP ;Set file title pointer
+ LDAIM 3
+ JSR SETRTN
+
+ LDYIM ARGG
+ LDAIM &80
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN ;** Call DIRMAN.DELETE **
+ BNE #10 ;Error
+
+ LDXIM 0 ;Set offset from MIDTX for file details
+ JSR CPYLXS ;Copy the whole lot over
+ CLC
+ TXA
+ ADCIM TXHDR ;Length of message
+ STA Cozero ;**1/7/87** save length
+ JSR OBJCLR ;Clear object out of map
+ BEQ #25 ;error returned here
+10 JSR RCODE ;Send error return
+20 JMP COMRTS ;And finish
+
+25 LDA Cozero ;**1/7/87** load reply length
+ BNE #30
+
+
+;Return user environment information.
+; 1) Call DIRMAN.EXAMINE to get dir. name, and disc
+;    number of CSD.
+; 3) Call MAPMAN.DISCNAME to get name of disc with
+;    given disc number.
+; 4) Call DIRMAN.EXAMINE to get title of LIB.
+
+USRENV 
+ JSR GETUSE
+ BNE #20
+
+ LDX BPTR
+ LDAIM TERMIN
+ STAAX MIDRX ;Fool DIRINF into getting CSD info.
+
+ LDAIM 17 ;Offset from MIDTX for dir. title
+ JSR DIRINF ;Read dir. information
+ BNE #40 ;Error -> bomb out
+ 
+ LDAIM 1 ;Offset from MIDTX for disc name
+ JSR CPDNAM ;Read disc name (note assumes disc no. on stack)
+ BNE #40
+
+ LDX BPTR
+ LDAAX CPLIB ;Read library handle
+ LDYIM UTHSLD
+ STAIY USTPTR ;Set as CSD of user
+
+ LDAIM 27 ;Offset from MIDTX of LIB name
+ JSR DIRINF ;Entry point not changing CSD handle
+ BNE #40
+
+ LDAIM DNAMLN ;Disc name length
+ STA MIDTX
+ LDAIM 0
+ STA CCODE
+ LDAIM TXHDR+37 ;Message length
+30 JSR REPLYC
+ JMP COMRTS
+
+40 JMP ERROR
+
+
+ 
+;*************
+;* L O G O N *
+;*************
+
+
+LOGON ROUT
+
+ JSR SPACES
+10 LDAAY MIDRX ;Step past station if present
+ CMPIM "." ;Network number terminator - special case
+ BEQ #20
+ CMPIM "0"
+ BCC #30 ;On if <0
+ CMPIM ":" ;On if >9
+ BCS #30
+20 INY
+ BNE #10
+
+30 JSR BUFTXT ;Read User
+ BNE #50
+ INX ;Step past CR between userid & pw
+ JSR BTXTA
+ BNE #50
+ JSR COMEND ;Check to end of C.line
+ BNE #50
+
+ LDYIM ARGB
+ LDX QPTR
+ LDAAX CBSTID
+ STAIY NEWARG
+ STA MCNUMB ;** 31/08/86 **
+ INY
+ LDAAX CBSTID+1
+ STAIY NEWARG
+ STA MCNUMB+1 ;** 31/08/86 **
+ INY
+ LDAAX CBflg ;**25/12/86** Get control byte
+ ANDIM MCtask ;**25/12/86** Isolate task no
+ STAIY NEWARG ;pass station id
+ STA MCnumb+2
+
+ JSR SBUFPT ;pointer to TXTBUF
+
+ LDAIM 1
+ JSR SETRTN
+ JSR USRMAN ;attempt logon
+ BNE #60 ;failed
+
+ LDYIM ARGH ;test for priv'd logon
+ LDAIY NEWARG
+ BNE #32 ;no monitor for priv'd users
+
+ BIT MONFLG
+ BPL #32 ;skip if monitor off anyway
+
+ LDY QPTR
+ JSR PRTMC ;output mc number
+ JSR VSTRIN
+ = ": I am "
+ NOP
+
+ LDXIM 0
+31 LDAAX TXTBUF
+ INX
+ JSR OSASCI ;print the user name
+ CMPIM CR
+ BNE #31
+
+32 LDYIM ARGG
+ LDXIM 3
+40 LDAIY NEWARG ;Get UFD/CSD/LIB handles + option byte
+ STAAX MIDTX
+ DEY
+ DEX
+ BPL #40
+
+45 LDAIM CCLGON
+ STA CCODE
+ LDAIM TXHDR+4 ;Message length
+ JSR REPLYC ;Send handles etc. back
+
+50 JMP COMRTS ;FINISH
+
+60 JMP ERROR
+
+
+;***************
+;* L O G O F F *
+;***************
+
+
+USROFF ROUT
+
+;(LABEL USROFF TO AVOID NAME CLASH
+;WITH USRMAN ROUTINE)
+
+;SET UP ARGS FOR LOGOFF (DELETE USER)
+;IN USERMAN, CALL, AND SEND APPROPRIATE
+;MESSAGE BACK TO CLIENT.
+
+ JSR COMEND
+ BNE #30
+
+FCBYE
+
+;nice if this returns no error if not logged on ** 5/9/84 **
+
+ JSR GETUSR ;23/1/76**
+ BEQ #10 ;check for logged on user here
+
+ LDAIM 0
+ BEQ #20 ;exit ok
+
+10 JSR STKUSE ;Entry by function code
+ BNE #30
+
+ LDAIM 2 ;LOGOFF ROUTINE NUMBER
+ JSR SETRTN
+ JSR USRMAN
+20 JSR RCODE
+30 JMP COMRTS
+
+
+
+CPSOPT ROUT
+
+;Set USER OPTION in pw file
+;Just call appropriate AUTMAN routine
+
+ JSR STKUSE
+ BNE #20
+ LDAAX MIDRX ;Note assumes X is BPTR here
+ CMPIM &10 ;Check option <16
+ BCS #30
+ INY
+ STAIY NEWARG
+ LDYIM UTPRIV ; check not low-priv user *** 25/5/86 ***
+ LDAIY USTPTR ; *** 25/5/86 ***
+ ANDIM LOPRIV ; *** 25/5/86 ***
+ BNE #40 ; error if so *** 25/5/86 ***
+ LDAIM 7
+ JSR SETRTN
+ JSR AUTMAN ;Call AUTMAN.USEROPTION
+10 JSR RCODE
+20 JMP COMRTS
+
+30 LDAIM INFERA ;Bad arg
+ BNE #10
+
+40 LDAIM ATERRD ; Insufficient privilege *** 25/5/86 ***
+ BNE #10
+
+
+;************************
+;* S E L E C T  D I S C *
+;************************
+
+
+SELDSC ROUT ;SELDSC
+
+;ALL WORK DONE IN USRMAN.
+
+ JSR RDTITL ;GET DISC NAME ON STACK
+ BNE #20
+
+ LDAIM &A
+ JSR SETRTN
+ JSR SBUFPT
+ JSR MAPMAN ;*** GET DISC NO FOR NAME **
+ BNE #30
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ PHA
+ INY
+ LDAIY NEWARG
+ INY
+ INY
+ STAIY NEWARG ;MOVE DISC. NO. UP TO MAKE WAY FOR USRPTR
+ DEY
+ PLA
+ STAIY NEWARG
+ JSR STKUSE ;SET USER POINTER
+ BNE #20
+ LDYIM ARGF
+ JSR STKHND ;PUT 3 HANDLES ON STACK
+
+ LDAIM 3
+ JSR SETRTN
+ JSR USRMAN ;*** SELECT DISC **
+ BNE #30
+
+ LDYIM ARGD
+ LDXIM 2
+10 LDAIY NEWARG
+ STAAX MIDTX
+ DEY
+ DEX
+ BPL #10
+
+ LDAIM CCSDIS
+ STA CCODE
+ LDAIM TXHDR+3 ;MESSAGE LENGTH
+ JSR REPLYC
+20 JMP COMRTS
+
+30 JMP ERROR
+
+
+;**********************
+;* S E L E C T  D I R *
+;**********************
+
+SELDIR ROUT ;SELDIR
+
+;ALL WORK DONE BY USERMAN AGAIN.
+
+ JSR RDTITL
+ BNE #10
+ JSR STKUSE
+ BNE #10
+
+ JSR SBUFPT ;** 5/9/84 **
+ LDYIM ARGF
+ JSR STKHND ;Handles -> stack
+ JSR SELHAN
+ BNE #20 ;error in allocation
+
+ LDAIM CCSDIR
+00 STA CCODE
+ LDAIM TXHDR+1 ;Message length
+ JSR REPLYC
+10 JMP COMRTS
+
+20 JMP ERROR
+
+
+SELHAN LDAIM 5 ;ROUTINE NUMBER
+ JSR SETRTN
+ JSR USRMAN ;*** SELECT DIR. **
+ BNE #30 ;exit if fail
+
+ LDYIM ARGB
+ LDAIY NEWARG
+ STA MIDTX ;New s.dir
+ LDAIM 0
+30 RTS
+
+;******************************
+;* S E L E C T  L I B R A R Y *
+;******************************
+
+;as for DIR but null filename is illegal
+;if RETRIEVE ok then call USRMAN with LIB as CSD
+
+SLIB JSR RDTITL
+ BNE #10
+ JSR STKUSE
+ BNE #10
+ JSR SBUFPT
+ JSR SCOWPT ;Set pointer to COWORK on stack
+ LDAIM 2 ;Dirman retrieve
+ JSR SETRTN
+
+ LDYIM ARGH
+ LDAIM &C0
+ STAIY NEWARG ;wild card flag
+
+ JSR DIRMAN ;*** RETRIEVE **
+ BNE #20
+
+ JSR STKUSE
+ BNE #10
+ JSR SBUFPT
+ JSR SCOWPT ;Set pointer to COWORK on stack
+
+ LDYIM ARGF
+ JSR STKHND ;handles -> stack
+
+ LDYIM ARGH
+ LDAIY NEWARG
+ DEY
+ STAIY NEWARG ;LIB->CSD
+ 
+ JSR SELHAN ;** 5/9/84 **
+ BNE #20 ;error in allocation
+
+ LDAIM CCSLIB
+ BNE #00
+
+
+;*********************
+;* S E T A C C E S S *
+;*********************
+
+
+SETACC ROUT
+
+;1) PUT USER INFO. POINTER AND FILE TITLE
+;POINTER ON STACK.
+;2) INTERPRET STRING SENT FROM CLIENT INTO
+;AN ACCESS BYTE AND STICK ON STACK.
+;3) CALL SETATTRIBS IN DIRMAN
+;4) REPLY TO CLIENT
+
+
+ JSR BUFTXT ;Get file name
+ BNE #40
+ STY COWORK ;Store cmnd. line ptr.
+ JSR STKUSE
+ BNE #40
+
+ JSR SBUFPT
+
+ LDY COWORK ;Restore cmnd. line ptr.
+ JSR SPACES
+
+ LDAIM 0
+ STA COZERO ;Partial result
+ DEY
+10 INY
+ LDXIM 2 ;Offset into access tables
+ JSR CMPACC ;Compare letter at Y with access tables
+ BEQ #10 ;Access letter found
+ CMPIM "/" ;Owner access delimiter
+ BEQ #20
+ JSR SPACER ;skip trailing spaces ** 25/5/83 **
+ CMPIM CR
+ BNE #50 ;Invalid character => error
+ DEY ;Point to CR so will exit after rotating COZERO
+
+20 ASL COZERO ;Rotate access bits to owner position
+ ASL COZERO
+
+30 INY ;Increment past '/' delimiter
+ LDXIM 1
+ JSR CMPACC
+ BEQ #30
+ JSR SPACER ;skip trailing spaces ** 25/5/83 **
+ CMPIM CR
+ BNE #50 ;If here, CR has terminated string => set access
+
+ LDYIM ARGF
+ LDAIM &C0
+ STAIY NEWARG ;wild cards flag
+ LDAIM 4 
+ INY ;Set arg to SETATTRIBS => SETACCESS
+ STAIY NEWARG
+ INY
+ LDA COZERO ;Restore access byte
+ STAIY NEWARG ;SET ACCESS BITS
+ LDAIM 4 ;SETACC ROUTINE NO.
+ JSR SETRTN
+ JSR DIRMAN ;*** SET ACCESS **
+ JSR RCODE ;SEND REPLY
+40 JMP COMRTS ;FINISH
+
+50 LDAIM SAERRA
+ JMP ERROR
+
+
+OWNTAB
+ = "R"
+ = "W"
+ = "L"
+
+POWNTB = 1 ;OWNER READ
+ = 2 ;OWNER WRITE
+ = 4
+
+CMPACC ROUT
+ LDAAY MIDRX
+ EORAX OWNTAB
+ ANDIM &DF ;Compare with cases forced
+ BEQ #10
+ DEX
+ BPL CMPACC
+ LDAAY MIDRX ;Exit, A = char, Z unset
+ RTS
+
+10 LDAAX POWNTB
+ ORA COZERO
+ STA COZERO ;Update partial result
+ LDXIM 0 ;Set Z flag; note A corrupted
+ RTS
+
+
+
+;******************
+;* N E W  U S E R *
+;******************
+
+
+NEWUSE ROUT
+
+;ALL WORK DONE IN AUTMAN, ROUTINE NO. 1
+
+ JSR RDTITL ;Get user name
+ BNE #10
+ JSR STKUSE ;Stack caller's user info
+ BNE #10
+ JSR SBUFPT ;Stack new user ptr.
+
+ LDAIM 1
+DOUSE JSR SETRTN ;SET ROUTINE NUMBER
+ JSR AUTMAN ;DO NEW USER
+ JSR RCODE ;SEND RETURN CODE
+RUEXIT  ;Shared with REMUSE
+SPWEXT  ;Shared with SETPW
+10 JMP COMRTS ;FINISH
+
+
+
+;************************
+;* R E M O V E  U S E R *
+;************************
+
+REMUSE ROUT
+
+;REMARKABLY SIMILAR TO NEWUSER
+
+ JSR RDTITL
+ BNE RUEXIT
+ JSR STKUSE
+ BNE RUEXIT
+ JSR SBUFPT
+
+ LDAIM 4
+ BNE DOUSE ;Always jump
+
+
+;**************************
+;* S E T  P A S S W O R D *
+;**************************
+
+
+SETPW ROUT
+
+;GET USER INFO AND CALL ROUTINE IN AUTMAN
+;TO DO WORK.
+
+ JSR BUFTXT ;Buffer old pw
+ BNE SPWEXT
+ INX ;Ptr. to next free spot in TXTBUF
+ JSR BTXTA ;Buffer new pw
+ BNE SPWEXT
+ JSR COMEND
+ BNE SPWEXT
+
+ BIT MONFLG ;Do monitor message specially to avoid PW
+ BPL #00 ;No monitor -> carry on
+ LDY QPTR ;Point to RX control block
+ JSR PRTMC ;Print machine number
+ JSR VSTRIN
+ = ": Pass",CR
+ NOP
+
+00 JSR STKUSE
+ BNE SPWEXT
+ JSR SBUFPT
+
+ LDYIM UTPRIV ; check low-privilege *** 25/5/86 ***
+ LDAIY USTPTR ; *** 25/5/86 ***
+ ANDIM LOPRIV ; *** 25/5/86 ***
+ BNE #10 ; br if password not allowed *** 25/5/86 ***
+
+ LDAIM 3 ;ROUTINE NUMBER
+ BNE DOUSE ;Always jump
+
+10 LDAIM ATERRD ; Insufficient privilege *** 25/5/86 ***
+ JMP ERROR ; *** 25/5/86 ***
+
+
+;**********************
+;* C R E A T E  D I R *
+;**********************
+
+
+CDIRFN ROUT
+ JSR Stkuse ; Check logged-on first
+ BNE #20 ; *** 31/10/86 ***
+ LDY BPTR
+ INY
+ JSR RDTITL
+ BNE #20
+ LDY BPTR
+ LDAAY MIDRX
+ BEQ #30 ;zero is a silly number
+ CMPIM (:MSB:MAXDIR)+1
+ BCS #30
+ BCC #10 ;check for overflow
+
+CDIR   ;CDIR
+
+;PASS USER INFO AND DIRECTORY NAME
+;TO DIRMAN. THEN CLEAN UP IF NECCESSARY.
+
+ JSR RDTITL
+ BNE #20
+ LDAIM 2 ;size of directory
+
+10 CMP CACHSZ+1 ;** 31/1/85
+ BCS #30
+ LDYIM ARGF
+ STAIY NEWARG
+ INY
+ LDAIM &80 ;** 11/10/84 **
+ STAIY NEWARG ;wild card flag
+ JSR STKUSE
+ BNE #20
+
+ JSR SBUFPT
+ LDAIM 5 ;CREATE DIR. FUNCTION CODE
+ JSR SETRTN
+ JSR DIRMAN ;*** DO DIR. CREATE **
+ BNE #15
+ JSR OBJCLR ;CLEAR OLD OBJECT
+15 JSR RCODE ;store RC
+
+SPEXIT  ;Shared with SETPRIV
+20 JMP COMRTS
+
+30 LDAIM DRERRP
+ JMP ERROR
+
+
+;******************
+;* S E T  P R I V *
+;******************
+
+
+STPRIV ROUT
+
+;MOST WORK DONE BY AUTMAN
+
+ JSR BUFTXT ;MOVE USER ID.
+ BNE SPEXIT
+ STY COWORK
+ JSR STKUSE
+ BNE SPEXIT
+ JSR SBUFPT
+
+ LDY COWORK
+ JSR SPACES
+ ANDIM &DF ;Force upper case
+ CMPIM "S" ;SYSTEM USER ???
+ BEQ #10
+ CMPIM "L" ;ow-privilege user? *** 25/5/86 ***
+ BEQ #50 ; *** 25/5/86 ***
+ CMPIM CR ;NON-SYSTEM USER ??
+ BNE #30
+ LDAIM 0 ;NON-SYST. USER
+ BEQ #20
+
+10 INY
+ JSR COMEND
+ BNE SPEXIT
+ LDAIM 1 ;SYSTEM USER !
+20 LDYIM ARGF
+ STAIY NEWARG ;Set user's priv. flag
+ LDAIM 5 ;SET PRIV.
+ JMP DOUSE
+
+30 LDAIM SPERRA
+40 JMP ERROR
+
+50 INY ; *** 25/5/86 ***
+ JSR COMEND ; *** 25/5/86 ***
+ BNE SPEXIT ; *** 25/5/86 ***
+ LDAIM 2 ;Low-privilege user *** 25/5/86 ***
+ BNE #20 ; *** 25/5/86 ***
+
+;*************
+;* D I S C S *
+;*************
+
+DISCS ROUT
+
+;Provide list of discs currently on system.
+
+;User supplies entry (drive) number, and
+;number of drives. For each drive he is interested in,
+;call MAPMAN once to get disc number
+;and again to get disc name.
+
+ LDAIM 0
+ STA COZERO ;No. of drives found
+ LDA BBUF
+ CLC
+ ADCIM TXHDR+1 ;Result buffer
+ STA COZERO+1
+ LDA BBUF+1
+ ADCIM 0
+ STA COZERO+2
+10 LDX BPTR
+ LDAAX MIDRX
+ CMP DRIVES
+ BCS #30 ;User drive >= drives
+
+ LDYIM 0
+ STAIY COZERO+1 ;Store probable drive number
+ LDYIM ARGB
+ STAIY NEWARG
+ LDAIM 8 ;Drive -> disc no.
+ JSR SETRTN
+ JSR MAPMAN
+ BNE #28 ;Abort
+ LDAIM &B ;Disc no. -> name
+ JSR SETRTN
+ JSR MAPMAN
+ BNE #40
+ INC COZERO+1
+ BNE #20
+ INC COZERO+2
+20 LDA COZERO+1
+ STA MOVTO
+ LDA COZERO+2
+ STA MOVTO+1
+
+ LDYIM ARGB
+ LDAIY NEWARG ;Ptr. to name
+ STA MOVFRM
+ INY
+ LDAIY NEWARG
+ STA MOVFRM+1
+ LDXIM DNAMLN
+ JSR MOVE ;Move name to result
+ CLC
+ LDA COZERO+1
+ ADCIM DNAMLN
+ STA COZERO+1
+ BCC #25
+ INC COZERO+2
+25 INC COZERO ;No. of drives dealt with
+28 LDX BPTR ;**14/06/86**
+ INCAX MIDRX ;Next drive to do
+ LDA Cozero ;**1/5/87** loop until requested drives done
+ CMPAX Midrx+1 ;**1/5/87**
+ BCC #10 ;**1/5/87**
+
+30 LDYIM ARGB
+ LDA COZERO ;Set args to LSTPRY
+ STAIY NEWARG
+ INY
+ LDA COZERO+1
+ STAIY NEWARG
+ INY
+ LDA COZERO+2
+ STAIY NEWARG
+ LDAIM CCDSCS
+ JSR LSTRPY ;Reply to client
+35 JMP COMRTS
+
+40 JSR EXTERR
+ JMP #35
+
+;*************
+;* U S E R S *
+;*************
+
+CPUSRS ROUT
+
+ JSR STKLST
+
+ JSR GETUSR ;Get current user (16/1/86)
+ BNE #15 ;***31/10/86***
+ LDYIM UTPRIV
+ LDAIY USTPTR
+ ANDIM SYSTPV ;Stack privilege for USRMAN
+05 LDYIM ARGF
+ STAIY NEWARG
+ LDX BPTR
+ LDAAX RXBUF+1 ;**20/5/87** check function code
+ EORIM (FNusr2-FNtab)/2 ;**20/5/87** zero if job/task nos
+ INY
+ STAIY NEWARG
+
+ LDAIM 7
+ JSR SETRTN
+ JSR USRMAN
+ BNE #10
+ LDAIM CCUSRS
+ JSR LSTRPY
+ JMP COMRTS
+
+10 JMP ERROR
+  
+15 LDAIM 0 ;not logged on, hide priv users
+ BEQ #05
+
+;***********
+;* D A T E *
+;***********
+
+
+CPSETD ROUT ;Set the date ** 20/9/83 **
+ JSR Getuse ;***Check caller logged on***
+ BNE #20
+ LDYIM Utpriv ;***and system priv***
+ LDAIY Ustptr
+ ANDIM Systpv
+ BEQ #30 ;***31/10/86***
+ LDA DATE
+ PHA
+ LDA DATE+1
+ PHA ;SAVE DATE IN CASE WE NEED IT!
+ LDY BPTR ;check flag
+ LDAAY MIDRX
+ STA DATE
+ LDAAY MIDRX+1
+ STA DATE+1
+ JSR CHKDTE
+ BNE #10
+ LDY BPTR
+ LDAAY MIDRX+2
+ CMPIM 24
+ BCS #10
+ STA HRS
+ LDAAY MIDRX+3
+ CMPIM 60
+ BCS #10
+ STA MINS
+ LDAAY MIDRX+4
+ CMPIM 60
+ BCS #10
+ STA SECS
+ JSR SETTME
+ JSR PRDTE ;Display new date
+ PLA
+ PLA ;REMOVE SAVED DATE
+ LDAIM TXHDR ;Rx header only
+ BNE DATOUT
+
+10 PLA
+ STA DATE+1
+ PLA
+ STA DATE
+ LDAIM DTERR
+ JSR RCODE
+20 JMP COMRTS
+
+30 LDAIM ATerrd  ;Insufficient privilege *** 31/10/86 ***
+ JMP Error ;*** 31/10/86 ***
+
+CPDATE ROUT
+
+;No user check since doesn't involve
+;files.
+
+ JSR PRTIM
+ LDA DATE ;read date
+ STA MIDTX
+ LDA DATE+1
+ STA MIDTX+1
+ LDA HRS
+ STA MIDTX+2
+ LDA MINS
+ STA MIDTX+3
+ LDA SECS
+ STA MIDTX+4 ;Time = zero if clock not present
+ LDAIM TXHDR+5 ;Message length
+ BNE Datout
+
+
+;*****************
+;* V E R S I O N *
+;*****************
+
+CPVERN ROUT
+ LDYIM 0
+10 LDAAY VERSN
+ STAAY MIDTX
+ INY
+ CMPIM 6 ;end of version number character
+ BNE #10
+
+ TYA
+Datous ;Entry with text length in A
+ CLC
+ ADCIM TXHDR
+Datout ;Entry with msg length in A
+ LDXIM 0
+ STX CCODE ;0 command code
+ JSR REPLYC ;Message length in A here
+Datoux ;Here to just exit
+ JMP COMRTS
+
+ LNK UADE18

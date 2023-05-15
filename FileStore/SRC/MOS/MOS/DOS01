@@ -1,0 +1,620 @@
+ OPT 1 ; > <FileStoreMOSSource>.DOS01
+ TTL File server file DOS01
+
+; OSWORD &72 - Double Density Disk Access
+; 
+; Transfer up to &FF00 bytes at a time
+; XY=>control block:
+;   XY+ 0  Flag on entry, Returned result on exit
+;   XY+ 1  Addr0
+;   XY+ 2  Addr1
+;   XY+ 3  Addr2
+;   XY+ 4  Addr3
+;   XY+ 5  Command 
+;          (=&8 to read / &A to write  / &D set drive param / &E Verify / &F Format)
+;   XY+ 6  b0
+;          : top 5 bits of sector number b16-b20
+;          b4
+;          b5
+;          : drive number to be ORed with currently selected drive
+;          b7
+;   XY+ 7  Sector b8-b15
+;   XY+ 8  Sector b0-b7
+;   XY+ 9  Sector Count
+;   XY+10  unused
+;   XY+11  Length0
+;   XY+12  Length1
+;   XY+13  Length2
+;   XY+14  Length3
+;   XY+15
+;
+;  On exit: A=result. 0=OK, <>0=error, with ADFS error block filled in
+
+DRERRA * &4        ; NOT READY
+DRERRB * &40       ; WRITE PROTECTED
+DRERRC * &48       ; CRC ERROR
+DRERRD * &50       ; SECTOR NOT FOUND
+DRERRE * &60       ; BAD COMMAND
+DRERRF * &61       ; BAD SECTOR ADDRESS
+DRERRG * &63       ; VOLUME ERROR
+DRERRH * &65       ; BAD DRIVE
+DRERRI * &6F       ; ABORT
+
+MAXDRV * 6         ; Maximum number of drives
+
+; OSWORD &72 Operations
+DSREAD * &8
+DSWRIT * &A
+DSSETP * &D
+DSVERF * &E
+DSFORM * &F
+
+
+OSWDRW ROUT
+ STX DISCCB        ; XY is address of the control block (CB)
+ STY DISCCB+1
+ LDYIM 0           ; Offset 0 is a flag byte
+ LDAIY DISCCB      ; read the flag byte
+ BEQ #20           ; if zero, then it's OK to proceed, else error
+ 
+BADDRV
+ LDAIM DRERRH      ; Bad Drive
+OW72XX             ; shared exit routine
+ STAI DISCCB
+10                 ; return with XY pointing to the CB
+ LDXIM :LSB:DISCCB
+ LDYIM :MSB:DISCCB
+ RTS
+
+20
+ LDYIM 6           ; Drive / Sector
+ LDAIY DISCCB
+ LSRA              ; get the drive number from bits 7..5
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ CMPIM MAXDRV      ; drive number >= 6
+ BCS BADDRV
+ SBCIM 3           ; subtracting 4 (3+1) changes floppy drives 4/5 into 0/1
+ STA DRIVE         ; and hard drives 0/1/2/3 into FC/FD/FC/FF
+ TAX               ; store modified drive number in X
+ LDYIM 5           ; Offset 5 is the command byte
+ LDAIY DISCCB      ; read the command byte from the control block
+ BEQ RWDISK
+
+ CMPIM DSREAD      ; Disk read command
+ BEQ RWDISK        ; branch to common disk read/write code
+ 
+ CMPIM DSWRIT      ; Disc write command
+ BEQ RWDISK        ; branch to common disk read/write code
+ 
+ CMPIM DSSETP      ; command <&0D (Disc Set Parameters)
+ BCC DSCMDX        ; return with bad command code
+ CMPIM &10         ; command >=&10
+ BCS DSCMDX        ; return with bad command code
+ 
+                   ; only command &D (Set Paramaters), &E (Verify) and &F (Format) remain
+ CPXIM 2           ; drive >=2?
+ BCS #10           ; return without doing anything at all
+ 
+                   ; save the drive geometry for future OSWORD calls
+                    
+ LDYIM 6           ; Y = 6
+ LDAIY DISCCB      ; geometry: number of sides
+ ANDIM &1F         ; just consider bits 4..0
+ BEQ DSCMDX        ; if zero, return with bad command code
+ STAAX SECTHI      ; if non-zero, store in CB+13 (drive 0) or CB+14 (drive 1)
+ 
+ CMPIM 3           ; only supported values are 1 (single sided) or 2 (double sided)
+ BCS DSCMDX        ; if number of sides > 2, return with bad command code
+ INY               ; Y = 7
+ LDAIY DISCCB      ; geometry: physical sectors per track
+ STAAX SECTMI      ; store to SECTMI (drive 0) or SECTMI+1 (drive 1) TODO: better as DISCCB+x?
+ INY               ; Y = 8
+ LDAIY DISCCB      ; geometry: physical cylinders (tracks)
+ STAAX SECTLO      ; store to SECTLO (drive 0) or SECTLO+1 (drive 1)
+
+ LDYIM 5           ; Offset 5 is the command byte
+ LDAIY DISCCB      ; read command
+ CMPIM DSVERF      ; command <&E
+ BCC #10	   ; command D (Set Parameters) - return without doing anything
+ BEQ #40           ; command E (verify) - skip forward
+ JMP FDFRMT        ; command F (Format) - in DOS03
+
+DSCMDX             ; Disc command not known
+ TXA               ; X = modified drive number
+ BMI PASSHD        ; negative if hard drive, otherwise
+ LDAIM DRERRE      ; BAD COMMAND code
+ BRA OW72XX        ; return from OSWORD &72 with return code in A
+
+40
+ JMP FDVRFY        ; Command E (verify) in DOS03
+
+PASSHD
+ JMP HDOSW72       ; pass on to hard disc driver (in DOS02)
+
+; -------------------------------------------------------------------------------
+
+; Read/Write floppy disk 
+; On Entry :
+;    X = modified drive number (= original drive nummber - 4)
+;          hard drive: FC/FD/FC/FF
+;        floppy drive: 00/01
+
+RWDSK1
+ LDX DRIVE
+ LDAAX DBDRIV      ; get last FDC status value (???)
+ JSR OWSTAT        ; Convert FDC status (in A) to an OSWORD &72 return value (in A)
+ BRA OW72XX        ; return from OSWORD &72
+
+RWDISK ROUT
+ LDYIM 10          ; byte 10 in the command block is reserved
+ LDAIY DISCCB      ; it is expected to be set to zero by the caller
+ BNE DSCMDX        ; if non-zero, return with bad command code
+ LDYIM 9           ; sector count
+ LDAIY DISCCB
+ STA SECCNT        ; save sector count
+ BNE #30           ; if sector count non-zero, skip the code to process the length field
+
+; calculate sector count from length..
+
+ LDYIM &E          ; Y = 14
+ LDAIY DISCCB      ; Length3
+ BNE DSCMDX        ; if non-zero, return with bad command code
+ DEY               ; Y = 13
+ LDAIY DISCCB      ; Length2
+ BNE DSCMDX        ; if non-zero, return with bad command code
+ DEY               ; Y = 12
+ LDAIY DISCCB      ; Length
+ STA SECCNT        ; save sector count
+ DEY               ; Y = 11
+ LDAIY DISCCB      ; Length0
+ BEQ #20           ; length is an exact number of sectors
+ INC SECCNT        ; round up sector count
+ BEQ DSCMDX        ; if > 255 sectors, return with bad command code
+ 
+ PHX               ; stack the modified disk number
+ TAX               ; length0
+ CLC
+ LDYIM 1           ; Addr0
+ LDAIY DISCCB
+ STA #10+1         ; low byte of STZAX address = Addr0
+ INY               ; Y = 2
+ LDAIY DISCCB      ; Addr1
+ LDYIM &C          ; Y = 12
+ ADCIY DISCCB      ; + Length1
+ STA #10+2         ; high byte of STZAX address = Addr1 + Length
+
+10                 ; loop from X=Length0 to X=FF
+ STZAX &FFFF       ; zero the unused/end of the buffer
+ INX               ; so it's now a whole number of sectors
+ BNE #10
+ PLX               ; restore the modified drive number
+20
+ LDYIM 9           ; sector count offset in the control block
+ LDA SECCNT        ; sector count
+ STAIY DISCCB      ; save this back to the control block
+30
+ TXA               ; X = modified drive number
+ BMI PASSHD        ; negative if hard drive
+ 
+; Floppy Disk Sector Read/Write Code
+
+; Map logical sector to physical track / sector
+
+; The algorithm is roughly:
+;   Y (track) = 0
+;   sector_counter = logical start sector (b21..0)
+;   stride = 256b sectors per track
+;   do {
+;      Y ++
+;      sector_count -= stride
+;   } while sector_count >= 0
+;   Y --
+;   sector_count += stride
+;
+;  we now have
+;   Y = physical track
+;   sector_count = physical_sector
+
+ LDYIM 5
+ LDAIY DISCCB
+ BEQ RWDSK1
+
+; Initialize sector_counter (BUFLEN+1/BUFLEN/PHYSEC) with logical start sector
+
+ INY               ; Y = 6
+ LDAIY DISCCB      ; Drive / Sector
+ ANDIM &1F         ; mask off drive bits
+ STA BUFLEN+1      ; store sector counter b16-b20
+ INY               ; Y = 7
+ LDAIY DISCCB      ; Sector b8-b15
+ STA BUFLEN        ; store to sector counter b8-b15
+ INY               ; Y = 8
+ LDAIY DISCCB      ; Sector b0-7
+ STA PHYSEC        ; store to sector counter b8-b15
+ 
+ LDYIM 0           ; Y = track = 0
+ 
+ ; Calculate stride (sectors per track)
+ 
+ LDX DRIVE         ; modified drive number (0 or 1)
+ LDAAX SECTHI      ; geometry: number of sides (1 or 2)
+ RORA              ; C=1 if single sided, C=0 if double sided
+ LDAAX SECTMI      ; geometry: sectors per track for drive X
+ BCS #40
+ ASLA              ; double sectors per track if disk double sided
+40
+ STA DxSIDE        ; stride = 256b sectors per track
+
+; Loop doing repeated 24-bit subtraction 
+ 
+50
+ INY               ; increment track
+                   ; TODO: there should be a test for overflow here
+ LDA PHYSEC        ; Sector count b0-b7
+ SEC
+ SBC DxSIDE        ; subtract stride (256b sectors per track)
+ STA PHYSEC        ; Sector count b0-b7
+ LDA BUFLEN        ; Sector count b8-b15
+ SBCIM 0
+ STA BUFLEN        ; Sector count b8-b15
+ LDA BUFLEN+1      ; Sector count b16-b20
+ SBCIM 0
+ STA BUFLEN+1      ; Sector count b16-b20
+ BCS #50           ; C=1 if sector count >= 0
+ 
+ DEY               ; decrement track
+ 
+ LDA PHYSEC        ; Sector count b0-b7
+ ADC DxSIDE        ; stride
+ STA PHYSEC        ; Sector count b0-b7
+ 
+ TYA               ; track count
+ CMPAX SECTLO      ; compare sectors per track
+ BCC #60           ; branch if less
+ LDAIM DRERRF      ; BAD SECTOR ADDRESS
+ JMP OW72XX        ; return from OSWORD &72 with return code in A
+ 
+60
+ JSR FDSWTR        ; Y unchanged
+ STYZX DxTRCK      ; store track (Y) in DxTRCK (drive 0) or DxTRCK+1 (drive 1)
+ LDYIM 1           ; Y = 1
+ LDAIY DISCCB      ; Addr0 in control block
+ STA BUFLEN        ; current Addr0
+ INY               ; Y = 2
+ LDAIY DISCCB      ; Addr1 in control block
+ STA BUFLEN+1      ; current Addr1
+
+65
+ LDAIM :LSB:REC    ; compare the low byte of the network NMI handler against
+ CMP NMINET        ; the default REC handler
+ BNE #65           ; different, so wait
+ LDAIM :MSB:REC    ; compare the low byte of the network NMI handler against
+ CMP NMINET+1      ; the default REC handler
+ BNE #65           ; different, so wait
+
+FDSEEK
+ LDAIM &A          ; 10 RETRYS (for recoveable errors)
+ STA RETRYS        ; store in the retry counter
+80
+ LDAAX DxTRCK      ; track number for drive X
+ STA FDCD          ; write desired track number to FDC Data Register
+ PHP               ; Z=1 if track zero
+ LDAIM &1C         ; FDC command &1C - Seek (and load head and verify track num)
+ LDXIM :LSB:#90
+ LDYIM :MSB:#90
+ PLP               ; Z=1 if track zero
+ BEQ #95           ; track 0?
+85
+ JMP FDCMDA        ; issue floppy disk command
+90
+ BCC FDNEXT
+ BPL FDBAD
+ DEC RETRYS        ; decrement the retry count
+ BEQ FDBAD
+FDTRK0
+ LDXIM :LSB:#80    ; after FDC command, resume from label 80
+ LDYIM :MSB:#80
+95
+ LDAIM 8           ; FDC command &08 - Restore/Seek Track 0 (and load head)
+ BRA #85           ; issue command
+
+; -------------------------------------------------------------------------------
+;
+; Read/Write the next FDC Sector
+ 
+FDNEXT ROUT
+ LDX DRIVE         ; X = drive number (0 or 1)
+ LDAAX DxTRCK      ; read track number for drive X
+ CMP FDCTRK        ; compare with FDC track register
+ BNE FDSEEK        ; if different, do a seek
+
+ LDAIM &A          ; 10 retries (for recoverable errors)
+ STA RETRYS        ; store in the retry counter
+
+ LDAIM &BD         ; LDA abx
+ STA FDLDAX
+ LDA BUFLEN+1      ; read Addr1 (the MSB of the buffer address)
+ BNE #10
+ 
+ LDAIM &A9         ; LDA imm &EA00
+ STA FDLDAX
+ LDAIM 0
+ STA FDLDAX+1
+ LDAIM &EA
+ STA FDLDAX+2
+ BRA #20
+ 
+10                 ; A = Addr1 (the MSB of the buffer address)
+ STA FDLDAX+2      ; update MSB of the LDA abx instruction in the FDNMWR NMI handler
+ STA FDSTAX+2      ; update MSB of the STA abx instruction in the FDNMRD NMI handler
+ LDA BUFLEN        ; A = Addr0 (the LSB of the buffer address)
+ STA FDLDAX+1      ; update LSB of the LDA abx instruction in the FDNMWR NMI handler
+ STA FDSTAX+1      ; update LSB of the STA abx instruction in the FDNMRD NMI handler
+20
+ LDA PHYSEC        ; physical sector
+ LDX DRIVE         ; X = drive number (0 or 1)
+ CMPAX SECTMI      ; compare with geometry: sectors per track for drive X
+ BCC #30
+ SBCAX SECTMI      ; if greater, subtract sectors per track
+30
+ STA FDCSEC        ; store sector to the FDC Sector register
+ CMP FDCSEC        ; check it's stored
+ BNE #30           ; if not, keep trying
+
+ LDYIM 5           ; Command offset
+ LDAIY DISCCB      ; read command from control block
+ CMPIM DSWRIT      ; write?
+ BNE #50           ; no
+
+ LDAIM &A2         ; FDC Command &A2 = Write Sector
+ LDXIM :LSB:FDNMWR
+ LDYIM :MSB:FDNMWR ; Use the FDC NMI Write Handler (FDNMWR)
+ BRA #60
+
+40
+ LDAIM &D0         ; FDC Command &D0 = Force Interrupt
+ STA FDCC
+ JSR FDDEFI        ; set NMI vector back to "INT"
+FDBAD
+ JMP BADDRV
+ 
+45 BRA FDTRK0      ; seek track zero
+
+50 LDAIM &82       ; FDC Command &82 = Read Sector
+ LDXIM :LSB:FDNMRD
+ LDYIM :MSB:FDNMRD ; Use the FDC NMI Read Handler (FDNMRD)
+60
+ PHA               ; save the command
+ JSR FDNEWI        ; set the NMI vector from X/Y
+ STZ DxSIDE
+ LDX DRIVE         ; X = drive number (0 or 1)
+ LDA PHYSEC        ; physical sector
+ CMPAX SECTMI      ; compare with geometry: sectors per track for drive X
+ BCC #65           ; if less, then skip
+ INC DxSIDE
+ PLA
+ ORAIM &8          ; set bit 3 in the command (side 0/1)
+ PHA
+65
+ JSR FDSDSL        ; Floppy side select
+ LDXIM 0
+ LDYIM 3
+ STY DISCCB+&C     ; initialize the transfer done flag (set by the NMI)
+ PLA
+ STA FDCC          ; write the FDC command register (at last!)
+ LDAIM 3           ; set timeout counter &030000 * 28 cycles @ 2MHz = 2.75s
+ STZ CNTLSB
+ STZ CNTCSB
+ STA CNTMSB
+
+70
+ JSR #96           ; decrement timeout counter (20 cycles)
+ BEQ #40           ; if zero, it's been too long, so force FDC to interrupt (2 cycles)
+ CPY DISCCB+&C     ; check transfer done flag (3 cycles)
+ BEQ #70           ; if zero, then transfer still in progress (3 cycles)
+ 
+ JSR FDDEFI        ; set NMI vector back to "INT"
+
+72
+ JSR #96           ; decrement timeout counter
+ BEQ #40           ; if zero, it's been too long, so force FDC to interrupt (2 cycles)
+ LDA FDCS          ; read the FDC status register
+ RORA              ; shift bit 0 (BUSY) into carry
+ BCS #72           ; loop back if BUSY (i.e. wait for the idle state)
+ ASLA              ; undo the ROR A
+
+ BITIM 4           ; test bit 2 (LOST DATA - meaning the CPU didn't respond to DRQ in one byte time)
+ BNE #20           ; loop-back and retry the sector (indefitely I think)
+
+ BITIM &40         ; test bit 6 (WRITE PROTECT)
+ BNE #75           ; if set, then bail without retries
+
+ BITIM &18         ; test bits 3 (CRC ERROR) and 4 (RECORD NOT FOUND)
+ BEQ #80           ; branch if both OK
+
+ DEC RETRYS        ; decrement the retry counter
+ BPL #45           ; if >= 0 then seek track 0 and try again
+
+75                 ; a fatal error has occurred
+ JSR OWSTAT        ; Convert FDC status (in A) to an OSWORD &72 return value (in A)
+ JMP OW72XX        ; return from OSWORD &72 with return code in A
+
+80                 ; sector read/write was sucessful, so continue...
+ DEC SECCNT        ; decrement the sector count
+ BEQ #97           ; if zero, we are done, so exit
+
+ INC PHYSEC        ; increment physical sector
+
+ LDX DRIVE         ; X = drive number (0 or 1)
+ LDAAX DISCCB+13   ; geometry: sector size (1=256b or 2=512b) for drive X
+ RORA              ; C=1 if single sided, C=0 if double sided
+ LDAAX SECTMI      ; geometry: sectors per track for drive X
+ BCS #85
+ ASLA              ; double sectors per track if disk double sided
+85
+ CMP PHYSEC        ; compare physical sector to number 256b sectors per track
+ BNE #90           ; branch if still on the same track
+
+ STZ PHYSEC        ; next track, so set physical sector to zero
+ INCAX DxTRCK      ; and increment the desired track for drive X
+
+90
+ LDA BUFLEN+1      ; read Addr1 (the MSB of the buffer address)
+ BEQ #95           ; why is this a special case?
+ INC BUFLEN+1      ; increment Addr1 (the MSB of the buffer address)
+95
+ JMP FDNEXT        ; and back for the next sector
+
+96                 ; Decrement the 24-bit timeout counter
+ DEC CNTLSB        ; 5 cycles
+ BNE #97           ; 3 cycles
+ DEC CNTCSB
+ BNE #97
+ DEC CNTMSB
+97
+ RTS               ; 6 cycles
+
+; -------------------------------------------------------------------------------
+; FDC Read NMI Handler
+; - reads the FDC data register and writes the buffer
+
+FDNMRD ROUT
+ PHA
+ CPY FDCS          ; check FDC status matches &03 = bit 0:BUSY; bit 1:DRQ (set by caller)
+ BNE #10           ; branch if it doesn't
+ LDA FDCD          ; read FDC data register
+FDSTAX
+ STAAX &FFFF       ; write buffer - the address here is patched dynamically
+ INX               ; increment buffer index
+ BNE #20           ; branch if less then 256 bytes read
+10
+ STZ DISCCB+&C     ; clear the flag to indicate sector transfer complete
+ PLA
+ RTI
+
+
+; -------------------------------------------------------------------------------
+; FDC Write NMI Handler
+; - reads the buffer and writes the FDC data register
+
+FDNMWR
+ PHA
+ CPY FDCS          ; check FDC status matches &03 = bit 0:BUSY; bit 1:DRQ (set by caller)
+ BNE #10           ; branch if it doesn't
+FDLDAX
+ LDAAX &FFFF       ; write buffer - the address here is patched dynamically
+ INX               ; increment buffer index
+ STA FDCD          ; write FDC data register
+ BEQ #10           ; branch if 256 bytes written
+20
+ LDA FDCS          ; check FDC status matches &01 = bit 0:BUSY
+ CMPIM 1
+ BNE #10           ; branch if it doesn't
+ PLA
+ RTI
+
+
+; -------------------------------------------------------------------------------
+; Setup new NMI handler (for read/write transfers)
+;
+; ON Entry X=New handler routeine lo byte
+;          Y=New handler routeine hi byte
+
+FDNEWI ROUT
+ SEI
+ JSR INTCND        ; disable network use of NMI during disk accesses
+ STX NMIV
+ STY NMIV+1
+ RTS
+
+
+; -------------------------------------------------------------------------------
+; Reset NMI to the default NMI handler (INT)
+
+FDDEFI ROUT
+ LDXIM :LSB:INT    ; INT is the default NMI handler, in MOS03
+ LDYIM :MSB:INT
+ STX NMIV
+ STY NMIV+1
+ CLI
+ JMP INTCNU        ; increase interrupt count
+
+
+; -------------------------------------------------------------------------------
+; OSWORD Status
+; - convert the common FDC status bits into an OSWORD &72 return code
+
+OWSTAT ROUT
+ BITIM &10         ; bit 4 = RECORD NOT FOUND
+ BEQ #10
+ LDAIM DRERRD      ; SECTOR NOT FOUND
+ RTS
+10
+ BITIM &40         ; bit 6 = WRITE PROTECT
+ BEQ #20
+ LDAIM &FF         ; WRITE PROTECTED (??)
+ RTS
+20
+ BITIM 8           ; bit 3 = CRC ERROR
+ BEQ #30
+ LDAIM DRERRC      ; CRC ERROR
+ RTS
+30
+ LDAIM 0           ; SUCCESS
+ RTS
+
+; -------------------------------------------------------------------------------
+
+; Select Floppy Drive and Write Track register
+
+FDSWTR ROUT
+ LDX DRIVE         ; X = drive number (0 or 1)
+ LDA MSTATE        ; get current state from memory
+
+; clear selected drives and set side selected to 0
+ ANDIM &E8         ; Clear any existing drive status
+                   ; LED FDCTST FDCRST -FDCDEN NVRAM -FDSSEL -DRV2 -DRV1
+ ORAAX TFDRIV      ; Set status for this drive from x,Drive
+ STA MSTATE        ; update status in memory
+ STA ROMSWW        ; select drive
+
+ LDA FDCS          ; Read FDC status register
+ RORA              ; C = bit 0 (BUSY)
+ BCC #30           ; not busy, so proceed
+10
+ LDAIM &D0         ; FDC Command &D0 = Force Interrupt
+ STA FDCC          ; Write FDC command register
+20
+ INCA              ; wait ~125us
+ BNE #20
+30
+ LDAAX DxTRCK      ; read desired track for drive X
+ STA FDCTRK        ; Write FDC track register
+ CMP FDCTRK        ; check write successful
+ BNE #10           ; if not, force interrupt and try again
+ RTS
+ 
+ 
+; -------------------------------------------------------------------------------
+
+; Floppy Drive Side Select
+;
+; On Entry:
+;    DxSIDE should have the side number (0 or 1)
+
+FDSDSL ROUT
+ LDX DxSIDE        ; get side to select 0 or 1
+ LDA MSTATE        ; get current state from memory
+                   ; ensure bit is cleared
+ ANDIM &FB         ; LED FDCTST FDCRST FDCDEN NVRAM -FDSSEL DRV2 DRV1 
+ ORAAX TFSSEL      ; set select bit for side 0 or 1 (OR 0 | OR 4)
+ STA MSTATE        ; store a copy of the intended state
+ STA ROMSWW        ; select floppy side
+ RTS
+ 
+
+
+ LNK DOS02

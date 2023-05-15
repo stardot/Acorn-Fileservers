@@ -1,0 +1,607 @@
+ OPT Form00 ;File > Form00
+ TTL File server file FORM00
+
+;**********
+;* FORMAT *
+;**********
+
+; FORMAT <discnumber> <discname> command (Command mode 1 only)
+; formats a floppy disc as an empty fileserver disc.
+
+Fimptr * Mpscpt ;Reuse normal workspace
+Fgpptr * Mpmbpt
+Fgprpt * Mapent
+
+FMform ROUT
+ JSR NMdisr ;**22/5/88** read disc no & name
+ CMPIM 4 ;First allowed disc number (one digit)
+ BCC #03
+ STA Drivno ;Save for later
+ LSRA ;Put drive number into dscb
+ RORA
+ RORA
+ RORA
+ STA Dsccb+Cmd+1
+
+ JSR FMackn ;reply to caller now, lest he time out
+
+ LDAIM &0F ;Format command
+ STA Dsccb+Cmd
+ LDAIM FDside ;Disc manifests - number of sides
+ TSB Dsccb+Cmd+1
+ LDAIM FDsecs
+ STA Dsccb+Cmd+2
+ LDAIM FDcyls
+ STA Dsccb+Cmd+3
+ STZ Dsccb+Cmd+4
+ STZ Dsccb+Cmd+5
+ JSR Dsccmd ;Format disc
+ BEQ #05 ;Br if Ok so far
+ JMP #50 ;Else report error
+
+03 LDAIM Numerr ;Bad disc number
+ JMP Error
+
+
+; Now have the disc in the state where every sector looks like the bitmap
+; for an empty track.  Only the first sector of each cylinder is actually
+; used for this purpose however.  Next we write a number of other sector
+; images to initialise the disc as a AFS0 disc.   It is also made to look like
+; a full and rather small ADFS disc lest it ever be put in the wrong drives.
+
+; The required sector images are held at FMmaps in a compacted format:
+;
+; <number of sectors in next image - zero indicates all done>
+; <sector number (two bytes)>
+;
+; <-ve count -1 - -128 is group repeat>      | followed by grp as below
+;                                            | omitted unless grp used
+;
+; <number of bytes of data following 1-127>  |
+; <data bytes as just specified>             | 
+;
+; <offset to next data group>                |
+;
+; <length zero terminates>
+ 
+05 LDXIM :LSB:FMmaps ;set up to process list of compacted sector images
+ LDYIM :MSB:FMmaps
+ STX Fimptr
+ STY Fimptr+1
+ JSR Getdte ;Read date/time
+ LDA Date
+ STA FMdat1
+ STA FMdat2
+ STA FMdat3
+ LDA Date+1
+ STA FMdat1+1
+ STA FMdat2+1
+ STA FMdat3+1
+ LDXIM Dnamln-1 ;Now build disc names
+06 LDAAX Txtbuf
+ STAAX FMdnm1
+ STAAX FMdnm2
+ DEX
+ BPL #06
+10 LDX Freptr ;get address of work buffer
+ LDY Freptr+1
+ STX Fgpptr ;set up to build next sector group
+ STY Fgpptr+1
+ STX DSCCB+TRadd ;save in DSCB
+ STY DSCCB+TRadd+1
+ STZ DSCCB+TRadd+2
+ STZ DSCCB+TRadd+3
+ JSR #95 ;get number of sectors
+ BEQ #24 ;go exit if all done
+ STA DSCCB+CMD+4 ;else set sector count in DSCB
+12 PHA
+ LDXIM 0
+ LDAIM 0 ;zero out sector group initially
+15 JSR #90
+ DEX
+ BNE #15
+ PLA
+ DECA
+ BNE #12
+ LDX Freptr ;restore start pointer
+ STX Fgpptr
+ LDY Freptr+1
+ STY Fgpptr+1
+ JSR #95 ;get sector address
+ STA DSCCB+CMD+3
+ JSR #95
+ STA DSCCB+CMD+2
+ LDA Drivno
+ ASLA
+ ASLA
+ ASLA
+ ASLA
+ ASLA
+ STA DSCCB+CMD+1 ;drive number
+20 LDYIM :LSB:-1 ;default group repeat
+22 JSR #95 ;next string length
+ TAX
+ BEQ #35 ;br if end of sector group
+ BPL #25 ;br unless repeat group item
+ TAY ;save (-ve) group repeat count
+ LDA Fimptr ;prepare to reread group
+ STA Fgprpt
+ LDA Fimptr+1
+ STA Fgprpt+1
+ BRA #22
+
+24 BRA FMvok ;done, go say OK
+
+25 JSR #95 ;copy string to sector image
+ JSR #90
+ DEX
+ BNE #25
+ INY
+ BEQ #30 ;br if no more group repeat
+ LDA Fgprpt ;yes, reset source ptr
+ STA Fimptr
+ LDA Fgprpt+1
+ STA Fimptr+1
+ BRA #22
+
+30 JSR #95 ;get offset to next string
+ CLC
+ ADC Fgpptr
+ STA Fgpptr
+ BCC #20 ;br unless wraps sector
+ INC Fgpptr+1
+ BRA #20
+ 
+35 LDAIM &0A ;write function code
+ STA DSCCB+CMD
+ STZ DSCCB+CMD+5
+ JSR Dsccmd
+ BNE #50
+ JMP #10 ;if ok, onto next sector group
+
+FMVerr
+50 JSR Looker ;put error msg at MIDTX
+55 LDA CBstid ;copy caller station
+ STA Txbuf
+ LDA CBstid+1 ;and net 
+ STA Txbuf+1
+ LDA TXbuf-1 ;borrow a byte
+ PHA
+ LDAIM 1
+ STA TXbuf-1
+ LDXIM :LSB:(Txbuf-1)
+ LDYIM :MSB:(Txbuf-1)
+ LDAIM &14
+ JSR OSword ;NOTIFY caller of error
+ PLA
+ STA TXbuf-1 ;restore borrowed byte 
+ JMP Comrts ;'cos original request long since timed out
+
+FMVok
+ LDAIM "O"
+ STA Midtx
+ LDAIM "K"
+ STA Midtx+1
+ LDAIM CR
+ STA Midtx+2
+ LDA Drivno ;seek disc to home
+ JSR Rddata ;(a good a way as any - ignore errors)
+ BRA #55
+
+; Routine to store value in constructed image & step ptr
+
+90 STAI Fgpptr ;store value in image
+ INC Fgpptr ;and increment pointer
+ BNE #92
+ INC Fgpptr+1
+92 RTS
+
+; Routine to get value from compacted image & step ptr
+
+95 LDAI Fimptr ;get value from compacted image
+ INC Fimptr ;and increment pointer
+ BNE #99
+ INC Fimptr+1
+99 CMPIM 0 ;reset cc from A
+ RTS
+
+; Routine to acknowledge good syntax at least to caller.  Can't keep
+; him waiting until command complete, because the ECOnet request will
+; time out.
+;
+; Side effect - set store address in disc CB. 
+
+FMackm = "Please wait...",CR,&80
+
+FMackn ROUT
+ LDXIM 0 ;copy text
+10 LDAAX FMackm
+ STAAX Midtx
+ INX
+ CMPIM &80
+ BNE #10
+ TXA
+ CLC
+ ADCIM Txhdr
+ LDXIM CCinf ;reply as no-error text
+ STX Ccode
+ JSR Replyc
+
+ LDA Freptr ;Set store address to free store
+ STA Dsccb+Tradd
+ LDA Freptr+1
+ STA Dsccb+Tradd+1
+ STZ Dsccb+Tradd+2
+ STZ Dsccb+Tradd+3
+ RTS
+
+; Compacted sector images
+
+FMmaps ROUT
+ = 1
+ & 0 ;cylinder 0 sector 0 has first disc info ptr; also ADFS free map
+ = 1, FDsecs*FDside ;ADFS free space - cylinder 1
+ = Szoff-1 ;offset
+ = 1, FDsecs*FDside-2 ;first disc info sector
+ = 5 ;offset to 252
+ = 1, FDsecs*FDside ;ADFS disc size (1 cylinder!)
+ = 2 ;offset to checksum
+ = 1, FDsecs*FDside+FDsecs*FDside-2+FDsecs*FDside ;checksum
+ = 0,0 ;end sector
+
+ = 1
+ & 1 ;cylinder 0 sector 1 has second disc info ptr; also ADFS free sizes
+ [ FDside = 1
+ = 1,FDsecs-9 ;ADFS free length
+ |
+ = 1,FDsecs-7 ;ADFS free length
+ ]
+ = Szoff-1 ;offset
+ = 1, FDsecs*FDside-1 ;second disc info sector
+ = 8 ;offset
+ [ FDside = 1
+ = 1, FDsecs*FDside-9+FDsecs*FDside-1 ;checksum
+ |
+ = 1, FDsecs*FDside-7+FDsecs*FDside-1 ;checksum
+ ]
+ = 0,0 ;end sector
+
+ = 5
+ & 2 ;cylinder 0 sectors 2-6 have ADFS root directory
+ = 5,0,"Hugo" ;Master sequence + dir id
+ = 250,1,0 ;5-&FF
+ = 255,1,0 ;&100-&1FF
+ = 255,1,0 ;&200-&2FF
+ = 255,1,0 ;&300-&3FF
+ = &CC,2,"$",CR ;Directory name
+ = 9,1,2 ;Parent pointer
+ = 3,2,"$",CR ;Directory title
+ = 32,4,"Hugo" ;Dir id
+ = 0,0 ;end sectors 
+
+ = 1
+ & FDsecs*FDside-2 ;cylinder 0 sector last-2 has 1st disc info
+ = #20-#10 ;length of all next guff
+10 = "AFS0"
+FMdnm1 = "Fileserver disc0" ;overwritten by users name
+ & FDcyls ;cylinders per disc
+ & FDsecs*FDside*FDcyls ;sectors per disc
+ = 0 ;... continued
+ = 1 ;number of discs
+FMsecs & FDsecs*FDside ;sectors per cylinder
+ = 2 ;size of bitmap in sectors per cylinder
+ = 1 ;addition for next physical drive
+ = 1 ;increment for next logical drive
+ & FDsecs*FDside+2 ;sin of root directory ...
+ = 0 ;...continued
+FMdat1 & 0 ;overwritten by date of root
+ & 1 ;first cylinder of free space
+ = (FDsecs*FDside+7)/8 ;bytes per cylinder bitmap
+20 = 0,0 ;end sector
+
+ = 1
+ & FDsecs*FDside-1 ;cylinder 0 sector last-1 has 2nd disc info
+ = #40-#30 ;length of all next guff
+30 = "AFS0"
+FMdnm2 = "Fileserver disc0" ;overwritten by users name
+ & FDcyls ;cylinders per disc
+ & FDsecs*FDside*FDcyls ;sectors per disc
+ = 0 ;... continued
+ = 1 ;number of discs
+ & FDsecs*FDside ;sectors per cylinder
+ = 2 ;size of bitmap in sectors per cylinder
+ = 1 ;addition for next physical drive
+ = 1 ;increment for next logical drive
+ & FDsecs*FDside+2 ;sin of root directory ...
+ = 0 ;...continued
+FMdat2 & 0 ;overwritten by date of root
+ & 1 ;first cylinder of free space
+ = (FDsecs*FDside+7)/8 ;bytes per cylinder bitmap
+40 = 0,0 ;end sector
+
+
+ = 2
+ & FDsecs*FDside ;cylinder 1 sectors 0-1 have bit map
+ GBLA $Mbend ;bitmap in last byte
+ GBLA $Mbens ;max packed maps per sector
+ GBLA $Mbits ;map counter
+ GBLA $Mbyte ;bytes per cylinder bitmap
+ GBLA $Mbcnt ;packed maps in current sector
+ GBLA $Mbsec ;sector sizer
+ GBLA $Mbtot ;total packed maps to go
+$Mbyte SETA (FDsecs*FDside+7)/8 ;bytes per cylinder bitmap
+$Mbtot SETA FDcyls
+ WHILE $Mbtot > 0 ;loop to fill all sectors
+$Mbsec SETA 256
+$Mbens SETA 256/$Mbyte ;max bitmap sets per sector
+ [ $Mbtot = FDcyls ;if first sector
+ = $Mbyte*2 ;special for first two cylinders
+$Mbits SETA $Mbyte
+ WHILE $Mbits > 0
+ = &00
+$Mbits SETA $Mbits-1
+ WEND
+ = &80 ;first seven sectors used
+$Mbits SETA FDside*FDsecs-8
+ WHILE $Mbits > 7
+ = &FF ;all sectors free
+$Mbits SETA $Mbits-8
+ WEND
+$Mbend SETA 0
+ WHILE $Mbits  > 0
+$Mbend SETA $Mbend+$Mbend+1 ;calculate any final map byte
+$Mbits SETA $Mbits-1
+ WEND
+ [ $Mbend  > 0
+ = $Mbend ;last few sectors on cylinder
+ ]
+ = 0 ;offset to main group
+$Mbens SETA $Mbens-2
+$Mbsec SETA $Mbsec-$Mbyte-$Mbyte
+$Mbtot SETA $Mbtot-2
+ ]
+$Mbcnt SETA $Mbtot
+ [ $Mbcnt > $Mbens
+$Mbcnt SETA $Mbens ;calculate bitmap blocks in this cylinder
+ ]
+ = -$Mbcnt ;group repeat count
+ = $Mbyte ;group length
+$Mbits SETA FDside*FDsecs
+ WHILE $Mbits > 7
+ = &FF ;all sectors free
+$Mbits SETA $Mbits-8
+ WEND
+ [ $Mbend > 0
+ = $Mbend ;last few sectors on cylinder
+ ]
+ = $Mbsec-($Mbcnt*$Mbyte) ;offset to end of sector
+$Mbtot SETA $Mbtot-$Mbcnt
+ WEND
+ = 0 ;end sector
+
+ = 1
+ & FDsecs*FDside+2 ;cylinder 1 sector 2 has root directory map
+ = #60-#50 ;length of all next guff
+50 = "JesMap"
+ = 0,0
+ & 0 ;bytes in last block
+ & FDsecs*FDside+3 ;sin of first text block
+ = 0 ;... continued
+ & 2 ;number of blocks allocated
+60 = 0,0 ;end sector
+
+ = 2
+ & FDsecs*FDside+3 ;cylinder 1 sectors 2-3 have root directory
+ = #80-#70 
+70 & &1E5 ;ptr to first entry
+ = 0 ;first sequence number
+ = "$         " ;root directory name
+ & &1CB ;first free entry
+ & 1 ;number of entries in use
+ 
+ = &ff, &ff
+80
+ = 21, 2
+ & &22
+ = 27, 2
+;
+; And then the existing source continues
+;
+ & &2B
+ = 24,2
+ & &45
+ = 24,2
+ & &5F
+ = 24,2
+ & &79
+ = 24,2
+ & &93
+ = 24,2
+ & &AD
+ = 24,2
+ & &C7
+ = 24,2
+ & &E1
+ = 24,2
+ & &FB
+ = 24,2
+ & &115
+ = 24,2
+ & &12F
+ = 24,2
+ & &149
+ = 24,2
+ & &163
+ = 24,2
+ & &17D
+ = 24,2
+ & &197
+ = 24,2
+ & &1B1
+ = 24,2
+ & 0 ;end of used entries
+ = 0,10
+ = "Passwords " ;name of entry
+ = 9,5 ;offset past la, ea, acc
+FMdat3 & 0 ;to be filled in
+ & FDsecs*FDside+5 ;sin of Passwords file
+ = 0 ;... continued
+ = 0,0 ;end sector
+
+ = 1
+ & FDsecs*FDside+5 ;cylinder 1 sector 5 has password file map
+ = #95-#90 ;length
+90 = "JesMap"
+ = 0,0
+ & 0 ;bytes in last block
+ & FDsecs*FDside+6 ;sin of first text block
+ = 0 ;... continued
+ & 1 ;number of blocks allocated
+95 = 0,0 ;end sector
+
+ = 1
+ & FDsecs*FDside+6 ;cylinder 1 sector 6 has passwords file
+ = 5,"Syst",13 ;Define one privileged identifier
+ = Maxunm-1-5
+ = 1,13 ;null password
+ = Maxpw-1
+ = 5,4,4,4,0,&C0 ;free space, system privilege flag
+ = 0,0 ;end sector
+
+ = 0 ;end of all sectors
+
+
+; ************
+; * FSVERIFY *
+; ************
+
+; FSVERIFY <discnumber> command (command mode 1 only)
+; verifies a disc is a fileserver disc and that all
+; the sectors are readable without error.
+
+VERIFY ROUT
+ LDAIM &2F ;Winchester verify command code
+ STA Tempa ;preset command
+ JSR Spaces ;find arguments
+ CMPIM "0" ;first is disc number (one digit)
+ BCC #20
+ CMPIM "6"
+ BCS #20
+ ANDIM 7 ;isolate drive number
+ STA Drivno ;save for later
+ STA Mpdrve
+ INY
+ JSR Comend ;check end of command
+ BNE #40
+ LDA Drivno
+ JSR Rddata ;read disc sector 0
+ BNE #30
+ LDA Dsccb+Tradd ;set store address
+ STA MPscpt
+ LDA Dsccb+Tradd+1
+ STA MPscpt+1
+ JSR Chkdsc ;check disc is FS disc
+ BNE #30
+
+ JSR FMackn ;reply to caller now, lest he time out
+
+ LDXIM 9 ;zero (extended) disc CB
+05 STZAX Dsccb+Cmd
+ DEX
+ BNE #05
+
+ LDA Drivno
+ LSRA
+ RORA
+ RORA
+ RORA
+ STA Dsccb+Cmd+1
+ CMPIM 4*&20 ;Winchester or floppy?
+ BCC #50 ;Br if Winnie
+
+ LDAIM &0E ;VERIFY command code
+ STA Dsccb+Cmd
+ INC Dsccb+Cmd+1 ;Assume one-sided disc
+ LDYIM Mpszsc ;Get sectors per track
+ LDAIY Mpscpt
+ CMPIM FDsecs+2 ;See if 1/2 sided disc
+ BCC #10
+ LSRA
+ INC Dsccb+Cmd+1 ;Set 2 sided disc
+10 STA Dsccb+Cmd+2 ;Sectors per side
+ LDYIM Mpsznc ;extract drive parameters
+ LDAIY Mpscpt
+ STA Dsccb+Cmd+3
+15 JSR Dsccmd ;Perform Verify
+ BEQ #35 ;OK, end now
+18 JMP FMVerr ;else go send error
+
+20 LDAIM Woterr ;General syntax error
+25 JMP Error
+
+30 LDAIM Dcerrf ;Disc fault
+ BRA #25
+
+35 JMP FMVok ;say OK
+
+40 JMP Comrts
+
+50 LDA Tempa ;Winnie
+ STA Dsccb+Cmd ;set command now
+ CMPIM &E2 ;br if Certify
+ BEQ #15 ;fall through if Verify
+ LDYIM Mpszns ;set number of sectors
+ LDAIY Mpscpt
+ STA Brega
+ INY
+ LDAIY Mpscpt
+ STA Brega+1
+ INY
+ LDAIY Mpscpt
+ STA Brega+2 ;will need multiple operations
+ DEC Dsccb+Cmd+7 ;max is &FFFF
+ DEC Dsccb+Cmd+8
+ LDA Brega+2
+60 BNE #70 ;br if not final section
+ LDA Brega+1 ;final pass, do remnant
+ STA Dsccb+Cmd+7
+ LDA Brega
+ STA Dsccb+Cmd+8
+ BRA #15
+
+70 JSR Dsccmd ;do part verify
+ BNE #18 ;br if in error
+ CLC
+ LDA Dsccb+Cmd+8 ;update start block
+ ADC Dsccb+Cmd+5
+ STA Dsccb+Cmd+5
+ LDA Dsccb+Cmd+7
+ ADC Dsccb+Cmd+4
+ STA Dsccb+Cmd+4
+ BCC #75
+ INC Dsccb+Cmd+3
+75 INC Brega ;update count remaining
+ BNE #80
+ INC Brega+1
+80 DEC Brega+2
+ BRA #60
+
+FNSH
+LEFT * FRESTR-. ;get free store
+ [ LEFT > 0 ;must not overflow workspace
+ |
+ ! 0,"FRESTR incorrect"
+ ]
+
+; The original ROM has some junk at the end.
+; but don't add if Psuedo = Yes
+ [ Pseudods = No
+ = &87, &D0, &02, &E6, &88, &C6 
+ = &89, &80, &CB, &D0, &02, &E6, &88, &C6
+ = &89, &80, &CB, &80, &CB, &90, &03, &EE 
+ = &60, &81, &E6, &87, &D0, &02, &E6, &88
+ = &C6, &89, &80, &CB, &14, &3F, &A5, &B4 
+ ]
+
+;** T H E  E N D ***
+ END

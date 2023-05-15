@@ -1,0 +1,838 @@
+
+ OPT RMAN02 ;RNDMAN > Rman02
+ TTL File server file RMAN02
+
+;**************** RDRDCH ****************
+
+;RDRDCH: read one byte from an open file
+
+;Entry: ARGB = (LS) ptr to user info
+;ARGC = (MS) ptr to user info
+;ARGD = file handle
+;ARGE = sequence no. (in LS bit)
+
+;Exit:  ARGA = return code
+;ARGB = byte read
+;ARGC = end-of-file flag
+;normally zero,
+;#X80 if this is the last byte in file
+;#XC0 if this is byte after end of file
+
+;1) Get HANDTB entry from handle
+;2) Check that object is a file
+;3) Get RANDTB entry
+;4) Compare sequence no. in ARGD with that in RANDTB entry.
+;Same => old seq. file ptr := current SFP
+;increment sequence no. in RANDTB entry
+;Different => repeat of last read;
+;current SFP := old SFP
+;5) Check sequential file pointer against file size
+;SFP =  size => return $FE and EOFFLG = $C0
+;SFP >  size => end of file; return RC
+;SFP <  size => OK
+;6) Work out disc address of block containing
+;required byte, and offset of byte in block.
+;7) Find / get required block in cache (STRMAN)
+;8) Fetch required byte and return it
+;Increment current SFP in RANDTB
+
+RDRDCH ROUT
+ JSR INITRD ;GENPTR := user info; MCNUMB := machine no.
+;[RNDPTR := rubbish]
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HNDPTR := HANDTB entry
+ BNE #30 ;Not found - exit
+ 
+ JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #30 ;Not found (object not file)
+
+ LDYIM HTMODE
+ LDAIY HNDPTR ;check that file is open for input
+ ANDIM READAC
+ BNE #10
+ LDAIM RDERRO ;file not open for input ** 15/11/84 **
+ BNE #30
+
+10 JSR RDCSEQ ;Compare sequence numbers
+;and choose file ptr; if equal
+;then increment seq no.
+ JSR RDCKEX ;Check SFP against file length
+ BNE #30 ;End of file
+ LDAIM &FE ;Byte after last
+ BIT EOFFLG
+ BVS #20 ;Reading byte after last
+;so return $FE
+
+ JSR RDGBLK ;Get required block into cache
+;GENPTR := store address
+ BNE #30 ;error
+
+;*** Assuming blocksize is 256 bytes ***
+;Offset of required byte in block is given
+;by LS byte of seq. file pointer.
+
+ LDYIM RTCSFP
+ LDAIY RTEPTR ;LS byte of SFP
+ TAY
+ LDAIY GENPTR ;Get required byte
+20 LDYIM ARGB
+ STAIY ARGPTR ;Return byte read
+ INY
+ LDA EOFFLG
+ STAIY ARGPTR ;Return end-of-file flag
+
+ JSR RDISFP ;Increment Current SFP
+
+ LDAIM  0
+30 JMP RDEXIT ;Exit: Rc in A
+
+
+;**************** RDWRCH ****************
+
+;RDWRCH: write one byte to an open file
+
+;Entry: ARGB = (LS) ptr to user info
+;ARGC = (MS) ptr to user info
+;ARGD = file handle
+;ARGE = sequence no. (in LS bit)
+;ARGF = byte to be written
+
+;Exit:  ARGA = return code
+
+;1) Get HANDTB entry from handle
+;2) Check that object is a file
+;3) Check file open for update
+;4) Get RANDTB entry
+;5) Compare sequence no. in ARGD with that
+;in RANDTB entry.
+;Same => old seq. file ptr := current SFP
+;increment sequence no. in RANDTB entry
+;Different => repeat of last read;
+;current SFP := old SFP
+;6) Check sequential file pointer against file size
+;SFP >= size => end of file; extend file
+;SFP <  size => OK
+;7) Work out disc address of block containing
+;required byte, and offset of byte in block.
+;8) Find / get required block in cache (STRMAN)
+;9) Write byte to cache; mark cache buffer dirty
+;(but do not cause it to be written to disc: this will
+;happen when the cache space is needed for
+;something else, or when the file is closed.
+;The cache buffer is left unlocked between
+;calls of RDWRCH).
+;10) IF SFP > HWM THEN HWM := SFP
+;11) Increment current SFP
+
+RDWRCH ROUT
+ JSR INITRD ;GENPTR := user info; MCNUMB := machine no.
+;[RNDPTR := rubbish]
+
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HNDPTR := HANDTB entry
+ BNE #40 ;Not found - exit
+
+ LDYIM HTMODE ;Check file open for update
+ LDAIY HNDPTR ;Get mode
+ ANDIM WRITAC ;Extract write access bit
+ BNE #10 ;OK to write
+
+ LDAIM RDERRN ;"File not open for update"
+ BNE #40
+
+10 JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #40 ;Not found (object not file)
+
+ JSR RDCSEQ ;Compare sequence numbers
+;and choose file ptr; if equal
+;then increment seq no.
+ JSR RDCKSP ;Check SFP against file length
+ BIT EOFFLG ;If PTR = EXT, need to extend
+ BVS #20 ;V set => PTR = EXT => extend
+ BEQ #30 ;Otherwise, Z set if inside file
+;so don't extend
+
+;Must extend file
+;Allocate another block (1K bytes)
+
+20 LDAIM 1 ;Ls byte of new size
+ STA NEWFSZ ;**29/4/88** central subroutine
+ LDAIM 0
+ STA NEWFSZ+1
+ JSR RDEXSZ ;**29/4/** Change file size
+ BNE #40 ;Error
+
+30 JSR RDGBLK ;Get required block into cache
+;GENPTR := store address
+ BNE #40 ;error
+
+;*** Assuming blocksize is 256 bytes ***
+;Offset of required byte in block is given
+;by LS byte of seq. file pointer.
+
+ LDYIM ARGF
+ LDAIY ARGPTR ;Byte to be written
+ TAX  ;Save it
+ LDYIM RTCSFP
+ LDAIY RTEPTR ;LS byte of file pointer
+ TAY
+ TXA
+ STAIY GENPTR ;Write byte to cache
+
+ JSR MRKDRT ;Mark buffer dirty (addr in GENPTR)
+ JSR RDISFP ;Increment Current SFP
+ JSR RDSHWM ;Set high water mark
+
+ LDAIM 0 ;Success
+40 JMP RDEXIT ;Return - RC in A
+
+
+;****** RDRDAR ******
+
+;RDRDAR: read RANDTB info on open file
+
+;Entry: ARGB (LS) ptr to user info
+;ARGC (MS) ptr to user info
+;ARGD = file handle
+
+;Exit:  ARGA = return code
+;ARGB = (LS) Seq file ptr
+;ARGC = (CS)  "   "    "
+;ARGD = (MS   "   "    "
+;ARGE = (LS) File high water mark
+;ARGF = (CS)  "    "     "
+;ARGG = (MS)  "    "     "
+;ARGH = (LS) File size
+;ARGI = (CS)  "    "
+;ARGJ = (MS)  "    "
+
+;The file handle is used to find the HANDTB
+;entry, which points to the RANDTB entry
+;from which the info is extracted.
+
+RDRDAR ROUT
+ JSR INITRD ;GENPTR:=ptr to user info
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HNDPTR := HANDTB entry
+ BNE #40 ;Not found - exit
+
+ JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #40 ;Not found
+
+;Return current seq file ptr
+
+ LDYIM RTCSFP
+ LDAIY RTEPTR ;LS byte of SFP
+ LDYIM ARGB
+ STAIY ARGPTR
+ LDYIM RTCSFP+1
+ LDAIY RTEPTR ;CS byte
+ LDYIM ARGC
+ STAIY ARGPTR
+ LDYIM RTCSFP+2
+ LDAIY RTEPTR ;MS
+ LDYIM ARGD
+ STAIY ARGPTR
+
+;Copy 6 bytes from RANDTB entry to ARGPTR
+;stack.  (The 2 fields are in the same
+;order in each place).
+
+ LDXIM 6 ;Loop count
+ LDAIM ARGE ;1st stack offset
+ STA RNDTMP ;Temp workspace
+ LDYIM RTHWM ;Offset in RANDTB entry
+
+10 LDAIY RTEPTR ;Get data from RANDTB
+ STY RNDTMP+1 ;Save RANDTB entry offset
+ LDY RNDTMP ;Get stack offset
+ STAIY ARGPTR ;Put data on stack
+ INY
+ STY RNDTMP ;Save next stack offset
+ LDY RNDTMP+1 ;Restore entry offset
+ INY
+ DEX  ;Loop count
+ BNE #10 ;Loop if not zero
+ JSR RDCKSP ;check for EOF ** 26/5/83 **
+ BEQ #30 ;skip except on error
+
+ LDYIM ARGJ
+ STY RNDTMP
+ LDYIM ARGD
+ LDXIM 2 ;copy size to pointer area
+20 STY RNDTMP+1
+ LDY RNDTMP
+ LDAIY ARGPTR ;move the data
+ LDY RNDTMP+1
+ STAIY ARGPTR
+ DEC RNDTMP
+ DEY
+ DEX
+ BPL #20 ;three bytes
+
+30 LDAIM 0 ;All copied - set RC
+40 JMP RDEXIT ;Return - RC in A
+
+
+;****** RDSTAR ******
+
+;RDSTAR: set sequential file ptr
+
+;Entry: ARGB = (LS) ptr to user info
+;ARGC = (MS)  "   "   "   "
+;ARGD = file handle
+;ARGE = arg saying what to set
+;0: SFP
+;1: HWM ** 5/9/84 **
+;ARGF = (LS) New value to set
+;ARGG = (CS)  "   "    "   "
+;ARGH = (MS)  "   "    "   "
+;ARGI = 4th byte if any
+
+;Exit:  ARGA = return code
+
+;The file handle is used to find the RANDTB entry.
+;The arg in ARGE is inspected to find
+;out what is being set.
+
+RDSTAR ROUT
+ JSR INITRD ;GENPTR -> user info
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HANDPTR := HANDTB entry
+ BNE #10 ;error
+ JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #10 ;Not found
+
+;Inspect arg in ARGE
+
+ LDYIM ARGE
+ LDAIY ARGPTR
+ LSRA
+ BEQ #20 ;0 => set SFP
+            ;1 => set HWM
+
+ LDAIM RDERRM ;"Bad arg to RDSTAR"
+10 JMP #40
+
+;Set seq file ptr
+
+;IF newSFP < size THEN oldSFP = newSFP
+;ELIF openforwriting THEN resize file: HWM = newSFP: oldSFP = newSFP
+;ELSE IF newSFP <> size THEN error ELSE oldSFP = newSFP
+
+20 BCS #50 ;A = 1 => set extent of file
+ SEC
+ LDYIM ARGF
+ LDAIY ARGPTR
+ LDYIM RTFSZE
+ SBCIY RTEPTR ;Do RNDTMP := SFP - size
+ STA RNDTMP
+ LDYIM ARGG
+ LDAIY ARGPTR
+ LDYIM RTFSZE+1
+ SBCIY RTEPTR
+ STA RNDTMP+1
+ LDYIM ARGH
+ LDAIY ARGPTR
+ LDYIM RTFSZE+2
+ SBCIY RTEPTR
+ ORA RNDTMP
+ ORA RNDTMP+1
+ BCC #35 ;Set SFP = new SFP as size > SFP
+
+;Here SFP >= size, so attempt to point
+;outside file. If open for update, resize
+;else if SFP <> size then error else set SFP = new SFP
+
+25 PHP ;Push Z flag indicating SFP = size
+ LDYIM HTMODE
+ LDAIY HNDPTR ;Mode handle opened for
+ ANDIM WRITAC ;Check if open for writing
+ BNE #30 ;Yes, so resize
+
+ PLP ;Not open for writing, so check if SFP=size
+ BEQ #35 ;Yes, so set SFP
+ LDAIM RDERRL ;No => "attempt to point outside file"
+ BNE #40 ;Error exit
+
+30 PLP ;Restore stack, and resize file
+ LDYIM ARGH
+ LDAIY ARGPTR ;Set NEWFSZ to seq. ptr.
+ STA NEWFSZ+2
+ DEY
+ LDAIY ARGPTR
+ STA NEWFSZ+1
+ DEY
+ LDAIY ARGPTR
+ STA NEWFSZ
+ JSR RDCHSZ ;Change size of file
+ BNE #40 ;Error => exit
+
+;Copy SFP into RANDTB
+
+35 LDAIM ARGF
+ STA OFF1
+ LDAIM RTCSFP
+ JSR #90 ;Set current seq. ptr.
+ LDAIM RTOSFP ;Set old seq. ptr. as well
+ JSR #90
+ JSR RDSHWM ;**1/6/88** set HWM if SFP > old HWM
+37 LDAIM 0 ;Return code
+40 JMP RDEXIT ;Return - RC in A
+
+50 LDYIM HTMODE
+ LDAIY HNDPTR
+ ANDIM WRITAC
+ BNE #55 ;open for update
+ LDAIM RDERRN ;not open for update
+ BNE #40 
+
+55 LDYIM ARGF
+ LDXIM :LSB:-3
+60 LDAIY ARGPTR
+ STAAX NEWFSZ-:LSB:(-3)
+ INY
+ INX
+ BNE #60
+
+ LDYIM RTHWM+2
+ LDXIM 2
+65 LDAIY RTEPTR
+ CMPAX NEWFSZ
+ BNE #70
+ DEY
+ DEX
+ BPL #65
+ BMI #80 ;All ok
+
+;exactly the same size so NOP here
+
+70 LDYIM RTHWM
+ LDAIY RTEPTR
+ STA TEMPA ;save current extent
+ ROLA
+ STA TEMPB ;save carry as well
+
+;C=0 => extending the file
+
+ RORA
+ BCC #75
+
+;if decreasing file then must flush all blocks
+;else cache may be left with antiquated data
+
+ LDAIM 5
+ JSR SETRTN
+ JSR RDDSIN
+ JSR STRMAN ;flush all blocks
+ BNE #40
+
+75 JSR RDCHSZ ;call changesize
+ BNE #40
+
+80 JSR #88 ;Having resized file, set HWM to ptr. value
+ JMP #37
+
+;Little space-saving routine
+
+88 LDAIM ARGF
+ STA OFF1
+ LDAIM RTHWM
+90 STA OFF2
+ LDXIM ARGPTR
+ LDYIM RTEPTR
+ LDAIM 3
+ JMP MOVBLK
+
+
+;*** RDCHSZ ***
+
+;Change the size of a file to the 3-byte value
+;in NEWFSZ.  HNDPTR points at its HANDTB entry,
+;and RTEPTR at the RANDTB entry.
+
+;MAPMAN.CHANGESIZE is called, and the new
+;size is recorded in the RANDTB entry.
+
+;RC in A on exit.
+
+
+RDCHSZ ROUT
+ JSR RDDSIN ;Put disc and SIN on stack
+
+;Put new size on stack
+
+ LDA NEWFSZ ;LS byte
+ LDYIM ARGG
+ STAIY NEWARG
+ LDA NEWFSZ+1
+ INY
+ STAIY NEWARG ;CS byte
+ LDA NEWFSZ+2
+ INY
+ STAIY NEWARG ;MS byte
+
+ JSR JUSINF ;** 3/10/84 **
+
+ LDAIM 3 ;MAPMAN.CHANGESIZE
+ JSR SETRTN
+ JSR MAPMAN
+ BNE #10 ;Failed, return code
+
+;zero the new area if needed
+
+ JSR RDDSIN ;** 20/9/84 **
+
+ LDYIM RTFSZE
+ LDAIY RTEPTR
+ LDYIM ARGG
+ STAIY NEWARG
+
+ LDYIM RTFSZE+1
+ LDAIY RTEPTR
+ LDYIM ARGH
+ STAIY NEWARG
+
+ LDYIM RTFSZE+2
+ LDAIY RTEPTR
+ LDYIM ARGI
+ STAIY NEWARG
+
+ LDAIM 13
+ JSR SETRTN
+ JSR MAPMAN
+ BNE #10 ;failed, return code 
+ 
+;Size changed: record in RANDTB
+
+ LDAIM 6
+ JSR SETRTN ;Ensure map on disc
+ JSR MAPMAN ;Note assumes disc no. still on stack
+ BNE #10 ;Error -> leave
+
+ LDYIM RTFSZE
+ LDA NEWFSZ
+ STAIY RTEPTR ;LS byte
+ LDA NEWFSZ+1
+ INY
+ STAIY RTEPTR ;CS byte
+ LDA NEWFSZ+2
+ INY
+ STAIY RTEPTR ;MS byte
+
+ LDAIM 0 ;RC
+10 RTS
+
+
+;*** SETRPT ***
+
+;Set RTEPTR to point to RANDTB entry
+
+;Entry: HNDPTR points at HANDTB entry
+
+;Exit:  A = return code
+;RTEPTR points to corresponding RANDTB entry
+
+
+SETRPT ROUT
+ LDYIM HTACC
+ LDAIY HNDPTR ;A := type of object (& access)
+ ANDIM TYPE ;Mask type
+ CMPIM TYPFIL ;Is it a file?
+ BEQ #10 ;Jump if file
+
+ LDAIM RDERRI ;"Object not a file"
+ RTS  ;Return
+
+10 LDYIM HTRPTR
+ LDAIY HNDPTR ;LS byte
+ STA RTEPTR ;LS byte
+ INY
+ LDAIY HNDPTR
+ STA RTEPTR+1 ;MS byte
+
+ LDAIM 0 ;return code
+ RTS
+
+
+;*** RDDSIN ***
+
+;Put disc number and SIN on NEWARG
+;stack from ARGB - ARGF.
+
+RDDSIN ROUT
+ LDAIM HTDISC ;"Move from" offset
+ STA OFF1
+ LDAIM ARGB ;"move to" offset
+ STA OFF2
+ LDXIM HNDPTR ;Move from
+ LDYIM NEWARG ;Move to
+ LDAIM 5 ;Size of disc no. + SIN
+ JMP MOVBLK ;Note -> assumes DISC/SIN contiguous
+
+
+;*** RDCKEX ***
+
+;Check SFP against HWM (For read operation)
+
+RDCKEX ROUT
+ LDYIM RTHWM
+ BNE #10 ;share code with RDCKSP
+
+
+;*** RDCKSP ***
+
+;Check sequential file pointer against file size
+
+;Entry: RTEPTR points to RANDTB entry
+
+;Exit:  A = return code: 0 => OK, SFP < size
+;EOFFLG = 0 normally
+;= #X80 if this is last byte of file
+;= $C0 If byte after last
+
+RDCKSP LDYIM RTFSZE
+10 STY RNDTMP+2
+ LDAIM 0
+ STA EOFFLG ;First set EOFFLG to zero
+ SEC
+ LDY RNDTMP+2 ;Subtract SFP from file size
+ INC RNDTMP+2
+ LDAIY RTEPTR ;LS byte of file size
+ LDYIM RTCSFP
+ SBCIY RTEPTR ;Subtract LS bytes
+ STA RNDTMP ;Use RNDTMP as workspace
+ LDY RNDTMP+2
+ INC RNDTMP+2
+ LDAIY RTEPTR
+ LDYIM RTCSFP+1
+ SBCIY RTEPTR ;CS bytes
+ STA RNDTMP+1
+ LDY RNDTMP+2
+ INC RNDTMP+2
+ LDAIY RTEPTR
+ LDYIM RTCSFP+2
+ SBCIY RTEPTR ;Sets carry if SFP <= size
+
+ TAX  ;Save MS byte for EOFFLG test
+ ORA RNDTMP ;OR all 3 bytes of result
+ ORA RNDTMP+1 ;for zero test
+ BEQ #30 ;Jump if SFP = file size
+ BCC #40 ;Jump if SFP > file size
+
+;OK: SFP < file size | HWM
+;Set EOFFLG to #X80 if this is the last
+;byte of the file (size - SFP = 1)
+
+ CMPIM 1 ;Is OR of all bytes 1?
+ BNE #20 ;No
+ TXA  ;OR MS two bytes
+ ORA RNDTMP+1 ;CS byte
+ BNE #20 ;MS 2 bytes not both 0
+
+ LDAIM &80 ;(size - SFP)=1 so set
+ STA EOFFLG ;end-of-file flag
+
+20 LDAIM 0 ;OK: SFP <= file size
+ RTS
+
+;SFP = file size
+;Set end of file marker to indicate
+;reading/writing byte AFTER end of file.
+
+30 LDAIM &C0 ;Last AND one after last
+ STA EOFFLG
+ BNE #20 ;Exit, Z set, A=0
+
+40 LDAIM RDERRJ ;"End of file"
+ RTS
+
+
+
+;*** RDCSEQ ***
+
+;Compare sequence number received with that recorded
+;in RANDTB.  If they are equal, then increment
+;the sequence number in RANDTB and set
+;old SFP := current SFP
+;Otherwise, this is a repetition of the
+;last operation, so don't change the sequence number
+;and set current SFP := old SFP
+
+;Entry: RTEPTR points to RANDTB entry
+;ARGE on ARGPTR stack holds received
+;seq no (in LS bit)
+
+;Exit:  Sequence number
+;in RANDTB entry incremented if and only if
+;sequence numbers matched.
+
+RDCSEQ ROUT
+ LDYIM ARGE
+ LDAIY ARGPTR ;A := received seq no.
+ LDYIM RTINUS ;Seq no. byte of RANDTB entry
+ EORIY RTEPTR ;A := XOR of seq nos.
+ ANDIM 1 ;Mask out "in use" bit
+ BEQ #20 ;Jump if seq nos. equal
+
+;Seq nos different, so back up SFP:
+;current SFP := old SFP
+
+RDBACK LDYIM RTOSFP ;** 5/8/83 **
+ LDAIY RTEPTR
+ LDYIM RTCSFP
+ STAIY RTEPTR
+ LDYIM RTOSFP+1
+ LDAIY RTEPTR
+ LDYIM RTCSFP+1
+ STAIY RTEPTR
+ LDYIM RTOSFP+2
+ LDAIY RTEPTR
+ LDYIM RTCSFP+2
+ STAIY RTEPTR
+ RTS  ;Seq nos. different; return
+
+20 LDAIY RTEPTR ;Get seq. no.
+ EORIM 1 ;Flip seq no., leaving "in use" flag
+ STAIY RTEPTR
+
+;old SFP := current SFP
+
+ LDYIM RTCSFP
+ LDAIY RTEPTR
+ LDYIM RTOSFP
+ STAIY RTEPTR
+ LDYIM RTCSFP+1
+ LDAIY RTEPTR
+ LDYIM RTOSFP+1
+ STAIY RTEPTR
+ LDYIM RTCSFP+2
+ LDAIY RTEPTR
+ LDYIM RTOSFP+2
+ STAIY RTEPTR
+ RTS  ;Return
+
+
+;*** RDISFP ***
+
+;Increment sequential file ptr (3 bytes)
+
+RDISFP ROUT
+ CLC
+ LDAIM 1
+ LDYIM RTCSFP
+ ADCIY RTEPTR
+ STAIY RTEPTR ;LS byte
+ INY
+ LDAIY RTEPTR
+ ADCIM 0
+ STAIY RTEPTR ;CS byte
+ INY
+ LDAIY RTEPTR
+ ADCIM 0
+ STAIY RTEPTR ;MS byte
+
+ RTS  ;Return
+
+
+;*** RDGBLK ***
+
+;Gets the required block into the cache.
+;In order to speed up the operation, a means
+;is provided of usually avoiding a call of STRMAN.
+;Each entry in RANDTB contains a hint - in the form
+;of a pointer to the cache descriptor for the block
+;last used.  STRMAN guarantees that this will
+;continue to point to SOME cache descriptor, but if
+;there has been a store crisis in the cache, then
+;it may not still point to the block we want.
+;Therefore the hint is carefully checked for validity
+;before use.
+;If the hint is no good, then the required block
+;is read from disc by calling STRMAN.DISC ADDRESS->
+;STORE ADDRESS. The address of the cache descriptor
+;is put in the RANDTB entry as the next hint.
+
+;Entry: HNDPTR points to handle table entry
+;RTEPTR points to RANDTB entry
+
+;Exit:  A = RC
+;GENPTR contains store address of cache buffer.
+;Hint field of RANDTB entry points to cache
+;descriptor (or is zero).
+
+RDGBLK ROUT
+ JSR RDCHNT ;Check hint; set GENPTR if OK
+ BEQ #40 ;HINT OK, GO RETURN
+ JSR RDDSIN ;Put disc and SIN on stack
+
+;Logical block number of the block containing the
+;current byte is given by the top 2 bytes of the
+;sequential file pointer.
+;*** This firmly assumes that the blocksize is
+;*** 256 bytes (as does DIVIDE in MAPMAN).
+
+ LDYIM RTCSFP+1
+ LDAIY RTEPTR ;Seq file ptr (CS)
+ LDYIM ARGG
+ STAIY NEWARG ;Logical block no. (LS)
+ LDYIM RTCSFP+2
+ LDAIY RTEPTR ;Seq file ptr (MS)
+ LDYIM ARGH
+ STAIY NEWARG ;Logical block no. (MS)
+
+;Ask for one block only.  This simplifies the
+;arithmetic elsewhere.
+;(Would using units of > 1 block give a
+;significant speed improvement?)
+
+ LDAIM 0
+ LDYIM ARGJ
+ STAIY NEWARG
+ LDAIM 1 ; A=1
+ DEY
+ STAIY NEWARG
+
+ JSR SETRTN ; A=1 STRMAN: Disc address -> store address
+
+ JSR STRMAN ;*** STRMAN.DISC -> STORE ADDRESS **
+ BNE #40 ;Failed, go return
+ LDYIM ARGB ;GENPTR := store address
+ LDAIY NEWARG
+ STA GENPTR ;(LS)
+ INY
+ LDAIY NEWARG
+ STA GENPTR+1 ;(MS)
+
+ INY  ;Store cache desc. addr. in RANDTB entry
+ LDAIY NEWARG ;LS byte
+ LDYIM RTDESC
+ STAIY RTEPTR
+ LDYIM ARGE
+ LDAIY NEWARG ;MS byte
+ LDYIM RTDESC+1
+ STAIY RTEPTR
+
+;Must unlock cache window, so that it is not
+;locked between byte transfers.  Note that if
+;parallelism is ever introduced into the file
+;server, care must be taken that RNDMAN does
+;not relinquish control between deciding that
+;it has found a block in the cache and using it.
+
+;Very conveniently, STRMAN has left the buffer
+;address in the right place on the stack.
+
+ LDAIM 3 ;STRMAN.UNLOCKWINDOW
+ JSR SETRTN
+
+ JSR STRMAN ;*** STRMAN.UNLOCKWINDOW **
+
+40 RTS  ;exit
+
+ LNK RMAN03
+

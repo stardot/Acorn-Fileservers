@@ -1,0 +1,677 @@
+ OPT RMAN04 ;RNDMAN   >  Rman04
+ TTL File server file RMAN04
+
+;************ RDGBTS ************
+
+
+;RDGBTS: Get bytes from file
+
+;Entry: ARGA  = func code (9)
+;ARGB) = ptr to user info (LS)
+;ARGC) =  "   "  "    "   (MS)
+;ARGD  = file handle
+;ARGE) = buffer address (LS)
+;ARGF) =   "       "    (MS)
+;ARGG) = no. of bytes   (LS)
+;ARGH)   to be read     (MS)
+
+;Exit:  ARGA  = rc
+;ARGB) = no. of bytes actually read (LS)
+;ARGC)                              (MS)
+;ARGD  = flag: normally zero
+;$80 if this read includes
+;the last byte OR if it is
+;completely outside the file.
+
+;The read is done starting at the current SFP.
+;A call of RNDMAN.RDSUBO must be done at the start of each
+;external GETBYTES operation, followed by one or more calls
+;of RDGBTS.
+
+;*** N.B. Attempting a read partially or
+;completely outside the file is not an error
+;here.  Transfer completely outside file
+;will have been deletected in RDSUBO.
+
+;1) Get HANDTB entry from handle
+;2) Get RANDTB entry
+;3) BTSLFT := file size - SFP (bytes left)
+;4) EOFFLG := 0 (end of file flag)
+;5) IF transfer size < BTSLFT
+;THEN BTSLFT := transfer size
+;ELSE EOFFLG := $80 (end-of-file)
+;6) BTSXFD := BTSLFT (bytes transferred)
+;7) The transfer is done in 3 parts (any of which
+;may be null).
+;If the start address is not badly aligned on
+;a disc block boundary, then STRMAN is called to
+;get the required disc block into the cache.
+;(It may still be there from the last GETBYTES call).
+;The relevant bytes are copied into the buffer.
+;We are now aligned to a disc block boundary, so
+;can do a direct read by calling DSCMAN, provided
+;at least 256 bytes remain to be read.
+;The final partial block (if any) is read through
+;the cache.
+
+RDGBTS ROUT 
+ JSR INITRD ;GENPTR := user info; MCNUMB := machine no.
+
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HNDPTR := HANDTB entry
+ BNE #20 ;Not found - exit
+
+ JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #20 ;Not found (object not file)
+
+ LDYIM HTMODE
+ LDAIY HNDPTR ;check that file open for reading
+ ANDIM READAC
+ BNE #10
+ LDAIM RDERRO
+ BNE #20
+
+10 CLC ;CHECK CORRECT LIMIT
+ JSR RDBLFT ;BTSXFD := BTSLFT :=
+;min(transfer size, bytes left in file)
+;Also sets EOFFLG
+
+ JSR RDSBFA ;Set RDBFAD
+
+ JSR RDGBT1 ;Read first partial disc block
+ BNE #20 ;Failed
+
+ JSR RDGBT2 ;Read complete disc blocks in middle
+ BNE #20 ;Failed
+
+ JSR RDGBT3 ;Read final partial disc block
+ ;BNE #20
+
+;Reading worked OK
+
+ ;LDAIM 0
+
+;Exit: error code in A
+;Bytes transferred in BTSXFD
+
+20 PHA  ;Save error code
+
+ LDYIM ARGB ;Return bytes tranferred
+ LDA BTSXFD
+ STAIY ARGPTR ;LS byte
+ INY
+ LDA BTSXFD+1
+ STAIY ARGPTR ;MS byte
+
+ INY
+ LDA EOFFLG ;Return EOF flag
+ STAIY ARGPTR
+
+ PLA  ;Restore error code
+ JMP RDEXIT ;Exit: RC in A
+
+
+
+;************ RDPBTS ************
+
+
+;RDPBTS: Put bytes to file
+
+;Entry: ARGA  = func code (10)
+;ARGB) = (LS) ptr to user info
+;ARGC) = (MS)
+;ARGD  = file handle
+;ARGE) = (LS) buffer address
+;ARGF) = (MS)
+;ARGG) = (LS) number of bytes to be written
+;ARGH) = (MS)
+
+;Exit:  ARGA  = RC
+
+;The write is done starting from the current SFP.
+;The file is extended if necessary.
+;A call of RNDMAN.RDSUBO must be done at the
+;start of each external PUTBYTES operation,
+;followed by one or more calls of RDPBTS.
+
+;1) Get HANDTB entry from handle
+;2) Get RANDTB entry
+;3) Check open for writing
+;4) (abolished)
+;5) BTSLFT := file size - SFP (bytes left)
+;6) IF transfer size > BTSLFT
+;THEN extend file
+;BTSLFT := transfer size
+;7) BTSXFD := BTSLFT (bytes transferred)
+;8) The write is done in 3 parts
+;(any of which may be null).
+;They are (a) via the cache,
+;(b) directly to disc, and
+;(c) via the cache, as for RDGBTS (q.v.).
+;9) Adjust file HWM
+
+RDPBTS ROUT
+ JSR INITRD ;GENPTR := user info; MCNUMB:=machine no.
+
+ LDYIM ARGD
+ LDAIY ARGPTR ;A := handle
+ JSR FNDHND ;HNDPTR := HANDTB entry
+ BNE #10 ;Not found - exit
+
+ JSR SETRPT ;RTEPTR := RANDTB entry
+ BNE #10 ;Not found - exit
+
+ LDYIM HTMODE ;Check file open for update
+ LDAIY HNDPTR ;Get mode
+ ANDIM WRITAC ;Write access
+ BNE #20 ;OK to write
+
+ LDAIM RDERRN ;"Not open for update"
+10 BNE #40
+
+20 SEC ;CHECK CORRECT LIMIT
+ JSR RDBLFT ;BTSXFD := BTSLFT :=
+;min(transfer size, bytes left in file)
+
+ LDA EOFFLG ;Get end-of-file flag
+ BEQ #30 ;Not end of file
+
+;Must call MAPMAN to extend file
+
+ LDYIM ARGG ;**29/4/88**
+ LDAIY ARGPTR
+ STA NEWFSZ
+ INY
+ LDAIY ARGPTR
+ STA NEWFSZ+1
+ JSR RDEXSZ ;**29/4/88** Extend file
+ BNE #40 ;Failed
+
+30 LDYIM ARGG ;BTSLFT := xfer size
+ LDAIY ARGPTR
+ STA BTSLFT
+ INY
+ LDAIY ARGPTR
+ STA BTSLFT+1
+
+ JSR RDSBFA ;Set RDBFAD
+
+ JSR RDPBT1 ;Write 1st partial block
+ BNE #40 ;Failed
+
+ JSR RDPBT2 ;Write complete disc blocks
+ BNE #40 ;Failed
+
+ JSR RDPBT3 ;Write final partial block
+ BNE #40 ;Failed
+
+;Writing worked OK
+
+ JSR RDSHWM ;Adjust file HWM
+ LDAIM  0 ;=> successful return
+40 JMP RDEXIT ;EXIT: RC IN A
+
+; Routine to extend file.  Called with amount required
+; in NEWFSZ, NEWFSZ+1.  Adds 4K to round up.
+; Exit Z set if OK, else error code in A.
+
+RDEXSZ ROUT ;**29/4/88**
+ CLC
+ LDYIM RTCSFP ;NEWFSZ := SFP + xfer size
+ LDAIY RTEPTR ;SFP LS byte
+ ADC NEWFSZ ;xfer size (LS)
+ STA NEWFSZ
+ INY
+ LDAIY RTEPTR
+ ADC NEWFSZ+1
+ STA NEWFSZ+1 ;CS
+ INY
+ LDAIY RTEPTR
+ ADCIM 0
+ STA NEWFSZ+2 ;MS
+ LDAIM &8A
+ BCS #40 ;**29/4/88** Error if overflowed
+
+ LDAIM &FF ;Add 255 to round up
+ CMP NEWFSZ+2 ;**29/4/88** Unless reaching 24 bits
+ BEQ #50
+ CLC
+ ADC NEWFSZ ;Don't want LS byte
+ LDAIM 4 ;Add extra 1K
+ ADC NEWFSZ+1
+ STA NEWFSZ+1
+ BCC #25
+ INC NEWFSZ+2
+25 LDAIM 0
+ STA NEWFSZ ;Clear LS byte
+30 JSR RDCHSZ ;**29/4/88** call change size routine
+40 RTS
+
+50 STA NEWFSZ ;**29/4/88** getting near max, 
+ STA NEWFSZ+1 ;**29/4/88** round up now to max
+ BNE #30
+
+
+;*** RDBLFT ***
+
+;Initialize BTSLFT, BTSXFD & EOFFLG
+;for PUTBYTES/GETBYTES.
+;Carry is used as entry condition ** 24/1/84 **
+
+RDBLFT ROUT
+ LDAIM 0
+ STA EOFFLG ;EOFFLG=0
+ LDYIM RTFSZE ;BTSLFT := filesize - SFP
+ BCS #10 ;C=1 -> use filesize, use HWM
+ LDYIM RTHWM
+ SEC
+
+10 LDAIY RTEPTR ;** 24/1/84 **
+ INY
+ STY RNDTMP
+ LDYIM RTCSFP
+ SBCIY RTEPTR
+ STA BTSLFT ;LS byte
+ LDY RNDTMP ;** 24/1/84 **
+ LDAIY RTEPTR
+ LDYIM RTCSFP+1
+ SBCIY RTEPTR
+ STA BTSLFT+1 ;CS Byte
+ INC RNDTMP ;** 24/1/84 **
+ LDY RNDTMP ;next byte
+ LDAIY RTEPTR
+ LDYIM RTCSFP+2
+ SBCIY RTEPTR ;MS byte left in A
+
+ BCS #20 ;Size >= SFP
+
+;If filesize < SFP set BTSLFT to 0
+
+ LDAIM  0 ;BTSLFT := 0
+ STA BTSLFT
+ STA BTSLFT+1
+
+;Test xfer size > bytes left
+;> if A non-zero (MS byte)
+;or if xfer size > BTSLFT
+
+20 BNE #30 ;A not 0
+
+ SEC  ;BTSLFT - xfer size
+ LDA BTSLFT
+ LDYIM ARGG
+ SBCIY ARGPTR
+ STA RNDTMP ;Store LS byte
+ LDA BTSLFT+1
+ INY
+ SBCIY ARGPTR
+ ORA RNDTMP ;for zero test
+ BEQ #40 ;BTSLFT = xfer size
+ BCC #40 ;BTSLFT < xfer size
+
+;BTSLFT > xfer size: transfer OK
+;Set BTSLFT := xfer size
+
+30 LDYIM ARGG
+ LDAIY ARGPTR
+ STA BTSLFT
+ INY
+ LDAIY ARGPTR
+ STA BTSLFT+1
+ JMP #50
+
+;BTSLFT < xfer size: transfer too long
+;or outside file
+;Set EOFFLG to $80
+
+40 LDAIM &80
+ STA EOFFLG
+
+;BTSLFT now says how many bytes can be
+;transferred: set BTSXFD to this.
+
+50 LDA BTSLFT
+ STA BTSXFD
+ LDA BTSLFT+1
+ STA BTSXFD+1
+
+ RTS
+
+
+;*** RDSBFA ***
+
+;Set RDBFAD from call stack
+
+RDSBFA ROUT
+ LDYIM ARGE
+ LDAIY ARGPTR
+ STA RDBFAD
+ INY
+ LDAIY ARGPTR
+ STA RDBFAD+1
+ RTS
+
+
+;*** RDGBT1 ***
+
+;Read the first partial block of a GETBYTES
+;transfer, taking the SFP to a disc block
+;boundary.
+
+RDGBT1 ROUT
+ JSR RDSZE1 ;Get no. of bytes in A
+ CMPIM 0
+ BEQ #10 ;Exit if empty partial block
+ STA RNDTMP ;Save no. of bytes
+
+ JSR RDGBLK ;Get required block in cache
+ BNE #20 ;Failed
+
+;Copy from cache buffer to user buffer
+
+ LDA RDBFAD ;MOVETO := RDBFAD
+ STA MOVTO
+ LDA RDBFAD+1
+ STA MOVTO+1
+
+ LDYIM RTCSFP ;Offset in cache blk
+ LDAIY RTEPTR ;given by LS byte of SFP
+ CLC
+ ADC GENPTR
+ STA MOVFRM
+ LDA GENPTR+1
+ ADCIM  0
+ STA MOVFRM+1
+
+ LDX RNDTMP ;No. of bytes to copy
+ JSR MOVE ;Copy
+ JSR RDADJ1 ;Adjust BTSLFT, RDBFAD, SFP
+10 LDAIM 0 ;Return
+20 RTS
+
+
+;*** RDPBT1 ***
+
+;Write the first partial block of a PUTBYTES
+;transfer, taking the SFP to a disc block
+;boundary.
+
+RDPBT1 ROUT
+ JSR RDSZE1 ;Get no. of bytes in A
+ CMPIM 0
+ BEQ #10 ; Exit if empty partial block
+ STA RNDTMP ;Save no. of bytes
+
+ JSR RDGBLK ;Get required block in cache
+ BNE #20 ;Failed
+
+;Copy from user buffer to cache buffer
+
+ LDA RDBFAD ;MOVFRM := RDBFAD
+ STA MOVFRM
+ LDA RDBFAD+1
+ STA MOVFRM+1
+
+ LDYIM RTCSFP ;Offset in cache blk
+ LDAIY RTEPTR ;given by LS byte of SFP
+ CLC
+ ADC GENPTR
+ STA MOVTO
+ LDA GENPTR+1
+ ADCIM 0
+ STA MOVTO+1
+
+ LDX RNDTMP ;No. of bytes to copy
+ JSR MOVE ;Copy
+ JSR MRKDRT ;Mark cache buffer dirty
+ JSR RDADJ1 ;Adjust BTSLFT, RDBFAD, SFP
+10 LDAIM 0 ; Return
+20 RTS
+
+;*** RDSZE1 ***
+
+;Return size of 1st partial block in A.
+;size1 := (0 - LS byte of SFP) mod 256
+;size  := min(size1, BTSLFT)
+
+RDSZE1 ROUT
+ LDAIM 0
+ SEC
+ LDYIM RTCSFP
+ SBCIY RTEPTR ;0 - LS(SFP)
+
+ LDX BTSLFT+1 ;Is BTSLFT > 256
+ BNE #10 ; Yes
+ CMP BTSLFT
+ BCC #10 ;A < BTSLFT
+ LDA BTSLFT ;A > BTSLFT
+10 RTS
+
+
+;*** RDADJ1 ***
+
+;Adjust BTSLFT, RDBFAD, SFP by RNDTMP
+
+RDADJ1 ROUT
+ SEC  ;BTSLFT -:= RNDTMP
+ LDA BTSLFT
+ SBC RNDTMP
+ STA BTSLFT
+ BCS #10
+ DEC BTSLFT+1
+10 CLC  ;RDBFAD +:= RNDTMP
+ LDA RDBFAD
+ ADC RNDTMP
+ STA RDBFAD
+ BCC RDADJ3
+ INC RDBFAD+1
+
+;RDADJ3 entry adjusts SFP only
+
+RDADJ3 CLC  ;SFP +:= RNDTMP
+ LDYIM RTCSFP
+ LDAIY RTEPTR
+ ADC RNDTMP
+ STAIY RTEPTR
+ INY
+ LDAIY RTEPTR
+ ADCIM  0
+ STAIY RTEPTR
+ INY
+ LDAIY RTEPTR
+ ADCIM  0
+ STAIY RTEPTR
+ RTS
+
+
+;*** RDGBT2 *** and *** RDPBT2 ***
+
+;Do middle part of GETBYTES or PUTBYTES transfer
+;i.e. that part consisting of whole disc blocks.
+
+;The code is identical apart from the disc action.
+
+RDGBT2 ROUT
+ LDAIM 1 ;DSCMAN.READ
+ BNE #10
+
+RDPBT2 LDAIM 2 ;DSCMAN.WRITE - PUTBYTES entry
+10 STA RNDTMP ;Store disc action for later
+;Determine how many whole blocks there
+;are to be transferred.
+;*** Assumes blocksize = 256 bytes ***
+
+ LDA BTSLFT+1 ;Blocks = ms byte of bytes left
+ BEQ #20 ;Nothing to do
+
+;Must flush all blocks of object from
+;cache before doing direct transfer.
+
+ JSR RDFALL ;Leaves DISC & SIN on NEWARG stack
+ BNE #30 ;Failed
+
+;Call DSCMAN to READ/WRITE directly from/to
+;caller's buffer.
+
+;Start block no. is given by MS
+;two bytes of SFP.
+
+ LDYIM RTCSFP+1
+ LDAIY RTEPTR ;SFP (CS)
+ LDYIM ARGG
+ STAIY NEWARG ;Block no. (LS)
+ LDYIM RTCSFP+2
+ LDAIY RTEPTR ;SFP (MS)
+ LDYIM ARGH
+ STAIY NEWARG ;Block no. (MS)
+
+;Number of blocks is given by MS
+;byte of BTSLFT.
+
+ LDA BTSLFT+1
+ INY
+ STAIY NEWARG
+ LDAIM 0 ;MS byte of block count
+ INY  ;always zero (in 64K machine)
+ STAIY NEWARG
+
+ LDA RDBFAD ;Put buffer address on stack
+ INY
+ STAIY NEWARG
+ LDA RDBFAD+1
+ INY
+ STAIY NEWARG
+
+;Operation code was placed in RNDTMP
+;on entry to this routine.
+
+ LDA RNDTMP
+ JSR SETRTN
+ JSR DSCMAN ;*** DSCMAN.READ or DSCMAN.WRITE **
+ BNE #30 ;Failed
+
+;Must adjust SFP in RANDTB, RDBFAD, and BTSLFT
+;*** Assumes blocksize 256 bytes ***
+
+ LDA BTSLFT+1 ;No. of blocks
+ LDYIM RTCSFP+1 ;Add to CS byte of SFP
+ CLC
+ ADCIY RTEPTR
+ STAIY RTEPTR ;Put back
+ INY
+ LDAIM 0
+ ADCIY RTEPTR ;Carry to MS byte of SFP
+ STAIY RTEPTR ;Put back
+
+;Adjust MS byte of RDBFAD by no. of blocks
+
+ LDA BTSLFT+1 ;No. of blocks
+ ADC RDBFAD+1 ;MS byte of buffer addr
+ STA RDBFAD+1 ;Put back
+
+;Only a partial block remains, so MS
+;byte of BTSLFT is now zero
+
+ LDAIM 0
+ STA BTSLFT+1
+
+20 LDAIM 0 ; Return
+30 RTS
+
+;*** RDGBT3 ***
+
+;Read the last partial block of a GETBYTES
+;transfer
+
+RDGBT3 ROUT
+ LDA BTSLFT ;Get no. of bytes in A
+ BEQ #10 ;Nothing to do
+ JSR RDGBLK ;Get required block in cache
+ BNE #20 ;Failed
+
+;Copy from cache buffer to user buffer
+
+ LDA RDBFAD ;MOVTO := RDBFAD
+ STA MOVTO
+ LDA RDBFAD+1
+ STA MOVTO+1
+
+ LDA GENPTR ;MOVFRM := GENPTR
+ STA MOVFRM
+ LDA GENPTR+1
+ STA MOVFRM+1
+
+ LDX BTSLFT ;No. of bytes to copy
+ STX RNDTMP ;Store for RDADJ3 below
+ JSR MOVE ;Copy
+ JSR RDADJ3 ;Adjust SFP
+10 LDAIM 0
+20 RTS
+
+;*** RDPBT3 ***
+
+;Write the last partial block of a PUTBYTES
+;transfer
+
+RDPBT3 ROUT
+ LDA BTSLFT ;Get no. of bytes in A
+ BEQ #10 ;Nothing to do
+ JSR RDGBLK ;Get required block in cache
+ BNE #20 ;Failed
+
+;Copy from user buffer to cache buffer
+
+ LDA RDBFAD ;MOVFRM := RDBFAD
+ STA MOVFRM
+ LDA RDBFAD+1
+ STA MOVFRM+1
+
+ LDA GENPTR ;MOVTO := GENPTR
+ STA MOVTO
+ LDA GENPTR+1
+ STA MOVTO+1
+
+ LDX BTSLFT ;No. of bytes to copy
+ STX RNDTMP ;For RDADJ3 call below
+ JSR MOVE ;Copy
+ JSR MRKDRT ;Mark cache buffer dirty
+ JSR RDADJ3 ;Adjust SFP
+10 LDAIM 0
+20 RTS
+
+;********* RDEOF *****************
+
+;RDEOF: read "end of file" condition
+
+;Entry: ARGA = fn. code (#0F)
+;ARGB = ptr. to user info (LS)
+;ARGC = ptr. to user info (MS)
+;ARGD = handle
+
+;Exit : ARGA = RC
+;ARGB = zero if SFP <= HWM
+;#FF  if SFP => HWM
+
+RDEOF ROUT
+ JSR INITRD
+ LDYIM ARGD
+ LDAIY ARGPTR
+ JSR FNDHND ;Check handle/machine pair
+ BNE #30 ;Error -> exit
+ JSR SETRPT ;Set Random table ptr. (& check is file)
+ BNE #30 ;Not a file -> exit
+
+ JSR CMPHWP ;Compare HWM with PTR
+ BEQ #10 ;Ptr = HWM -> exit w/$FF
+ LDAIM 0
+ BCS #20 ;Ptr < HWM -> exit w/zero
+
+10 LDAIM &FF
+
+20 LDYIM ARGB
+ STAIY ARGPTR ;Set result
+ LDAIM 0 ;Set return code
+30 JMP RDEXIT ;Return
+
+ LNK RMAN05

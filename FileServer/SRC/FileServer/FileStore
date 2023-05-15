@@ -1,0 +1,14 @@
+ OPT 2 ;> <FileServerSource>.FileStore
+ TTL File server.  Initial variable setup for FileStore variant.
+
+ ORG &200
+
+ GBLL $Level3
+ GBLL $CMOS
+
+$Level3 SETL 1=0 ; False
+$CMOS   SETL 1=1 ; True
+
+ CPU 1
+
+ LNK Uade01

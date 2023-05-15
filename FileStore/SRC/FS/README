@@ -1,0 +1,379 @@
+FileStore FS ROM v1.31
+======================
+
+This disc contains the original source code for the Acorn FileStore E01/E01S
+file server ROM.
+
+Assembling the File Store Source Code
+======================================
+
+The source code will assemble on either a BBC with an Acorn Turbo (256K) 
+6502 Co-Processor and ADFS or on Arthur/RISC OS using the 6502 Turbo 
+Co-Processor emulator which is included here.
+To assemble on a BBC, use SHIFT-BREAK or *EXEC !BOOT. On RISC OS, double 
+clicking the file GO will start the process. The assembled file "FSROM" will be
+placed in the root directory. The assembly process is significantly faster 
+when a hard drive is used instead of a floppy.
+
+Files
+=====
+
+\ $
+  !BOOT     - BBC Routine to set library, load co-pro BASIC and call FSASM
+  FSASM     - Loads TurboMasm and starts the FileStore binary assembly
+  GO        - RISC OS Routine to set library, load emulator and call FSASM
+  README    - This file
+
+\ LIBRARY
+  65ARTHURT - The Turbo Co-processor emulator for RISC OS
+  CB        - BASIC for the Turbo Co-processor
+  TURMASM   - Turbo version of MASM assembler
+  
+\ FILESTORE  
+  The source code files  
+  FSmake    - BASIC program to put together the assembed parts and create
+              the Filestore ROM binary "FSROM"
+
+\ FILESTORE\X
+  Location for the assembled parts. Do not delete or the assembler will fail.
+
+
+Version 1.31
+============
+
+Date - estimated 20/7/88. This was the latest date of a comment in the code.
+The E01S first appeared in Technomatic adverts in Acorn User Jan 1989.
+
+Comments
+========
+The file server ROM is the original and unchanged source code. Since just 
+before v1.20 the FileStore had become an Acorn product which used the same 
+code base as the L3 fileserver. 
+
+The original file server FSmake that puts together the assembled parts has been
+altered to insert 512 bytes at the start of the ROM so the image is ready
+for use directly (if less than 32K). This maps to 512 bytes of zero page
+workspace as the ROM code executes from address 0x200. 
+
+An ammendement has been made at the end of the code to add some bytes to the
+file server ROM. When the file server code was originally assembled, it
+appears that when creating a ROM, some noise was picked up from code already
+on the disk. These few bytes have been replicated at the end, so a binary 
+compare to an original ROM is correct.
+
+v1.31 was the first release for the revised Acorn FileStore E01S model.
+The E01S uses 1 x 64K ROM instead of 2 x 32K ROMs. There is no difference in
+the code between the two systems.
+
+From the Acorn parts list there was a release between v1.23 and v1.31. A binary of this has not been found. There wasn't a corresponding MOS ROM and it is
+assumed only the file server ROM had the revision at this point.
+
+                                                        DATE 21.5.90
+
+==========================================================================
+ DRAWING /   |         TITLE                         | ISS | SHT |  LAST
+ NUMBER  /   |                                       |     |     | AMR/ECO
+=============|=======================================|=====|=====|========
+0254,206-01   FILESTORE FILESERVER ROM V 1.2A
+
+v1.31 is not listed in Acorn parts list.
+
+Depending on the options used, the FS ROM can overflow the 32K ROM as was the
+case in later versions. There is space at the start of the MOS ROM for the
+overflow but care must be taken with the start of workspace areas.
+The file MAKEROMS will take any overflow bytes and add them to the start of the
+MOS ROM, create a 32K FSROM, 32K MOSROM (for E01 Filestores) and a single 64K
+E01SROM (for E01S Filestores). Copy both the FSROM and MOSROM into the same
+directory, and run the program under Turbo Hi-BASIC.
+*CB
+CHAIN "MAKEROMS"
+The program can be found with the MOS ROM disk.
+
+Warning: There appear to be changes made to the file system handling over 
+previous versions. It has been found that hard drives from previous versions
+are not fully compatible with v1.31 - both L3 and FileStore.
+
+Changes (from v1.23) (FileServer)
+=================================
+
+The Filestore software has a big buffer cache option introduced for replies
+which is enabled in this version.
+
+Support for Pseudo directory symbols is no longer present, but kept as an
+optional assembler directive. The same for the MOS ROM debug code.
+Command line changes:
+Old Version   New command and syntax
+*FORMAT       *FSFORMAT <4|5> <NAME>
+*FSMODE       *FSMODE <U|M>
+*VERIFY       *FSVERIFY d
+*FSSTN        *FSSTATION sss
+*MAXDRIVE     *FSMAXDRIVE d
+*FSUSER       *FSUSER <name>
+*FSPROT       *FSPROT <ON|OFF>
+*REPORT       *FSREPORT
+
+New Commands are 
+*PRPAGE <Y|N>
+*FSNAMEDISC <name>
+
+Commands removed are
+*CAT
+*LOAD
+*SAVE
+*CERTIFY
+
+Form Feed suppression option (*PRPAGE). Bypass flag in CMOS for the Acorn copyright hard drive check. SIN added to disc error report strings.
+Year 20xx compatable, bugfix enlarging the password file. Support for multiple
+hard drives and E40S, E60S. Reset CMOS to default values if they are corrupt.
+A revised version of the AFS0 disk format is used to optimise use of the larger
+hard drives. Disks and floppies with the older AFS0 format will have issues.
+
+HEADER FILE 1
+20/07/88 Uade01  Line 0059 VERLB, version changed from 23 to 31
+18/02/88 Uade01  Line 0065 Pseudo directory (%, &, @) switch added - default off
+         Uade01  Line 0267 Size of IEaddr changed to 8 bytes for better error reporting
+08/02/88 Uade01  Line 0273 Flag added for the supression of print Form Feed
+23/03/88 Uade01  Line 0274 Flag added to bypass hard drive ACORN copyright check
+05/03/88 Uade01  Line 0275 variable CMinen added for CMOS table length
+        
+HEADER FILE 2
+         Uade02  Line 0117 Pseudo directory (%, &, @) switch
+                   to 0119 ]
+08/02/88 Uade02  Line 0239 Receive buffer length extended from 80 to 127 bytes
+01/05/86 Uade02  Line 0261 Mask for task number in control byte changed from &1E to &78
+08/02/88 Uade02  Line 0399 size of MIDRX changed to calculated length
+08/02/88 Uade02  Line 0418 File title buffer made always the same size as RXBUFL
+         Uade02  Line 0450 variable added for SIN of last disc error
+08/02/88 Uade02  Line 0465 Flag for printing no trailer FormFeed
+        
+ERROR HANDLING
+29/04/88 Uade03  Line 0051 reporting added for the SIN of last disc error
+29/04/88 Uade03  Line 0092 cancel any pending receive control blocks after error
+
+FILE SERVER INITIALISATION
+	 Uade04  Line 0036 INTERR changed to USRERR
+05/03/88 Uade04  Line 0046 Table of default values for initialsing CMOS RAM added
+05/03/88 Uaed04  Line 0066 Initialise CMOS RAM if not initialised
+24/02/88 Uade04  Line 0204 Code optimisation for date sanity check
+	           to 0205 "
+         Uade04  Line 0216 "
+         Uade04  Line 0228 "
+         Uade04  Line 0233 "
+                   to 0236 "
+
+USRMAN
+         Uade06A Line 0307 Pseudo directory (%, &, @) switch
+                   to 0310 ]
+01/06/88 Uade06A Line 0372 Routine LOGOFF
+	           to 0379
+07/07/88 Uade06A Line 0454 Routine GETUFD, add SETUID
+	           to 0458 and code optimzation reusing RTROOT
+07/07/88 Uade06A Line 0494 Routine GETLBH, to retrieve file "LIBRARY"
+                   to 0539
+
+RNDMAN
+29/04/88 Rman02  Line 0160 Change file size. code moved to a subroutine
+                   to 0163 RDEXSZ in Rman04 to extend the file
+29/04/88 Uade19  Line 0188 use RXEXSZ 
+                   to 0189 
+01/06/88 Rman02  Line 0382 bugfix: High water mark not increased when setting 
+                                  the sequential file pointer, if it exceeded 
+                                  the high existing high water mark
+23/03/88 Rman03  Line 0247 bugfix for the access mode for Putbytes/Getbytes
+                   to 0250 operations
+29/04/88 Rman04  Line 0182 Set new file size and call the new subroutine
+                   to 0187 RDEXSZ to extend the file
+29/04/88 Rman04  Line 0219 Subroutine RDEXSZ added
+         Rman04  Line 0252
+
+DIRMAN
+23/03/88 Uade0C  Line 0021 New function 13 added. Check if object will preserve
+	           to 0022 Increase the number of functions
+         Uade0C  Line 0041 add routine to table
+04/04/88 Uade0C  Line 0122 call as a subroutine
+                   to 0126 and use the DIRMAN exit function
+04/04/88 Uade0C  Line 0150 Routine DRRET2 set up the name, root character and 9
+                   to 0154 spaces
+04/04/88 Uade0C  Line 0167 add check for directory type and the locked bit
+                   to 0178
+         Uade0C  Line 0206
+                   to 0209 
+         Uade0C  Line 0212 Pseudo directory (%, &, @) switch
+                   to 0227 |
+                   to 0229 ]
+         Uade0C  Line 0223
+                   to 0226 
+         Uade0C  Line 0533 Pseudo directory (%, &, @) switch
+                   to 0540 ]
+04/04/88 Uade0C  Line 0260 Change to RTS as a subroutine exit
+         Uade0CA Line 0032 INTERR changed to USRERR
+04/04/88 Uade0CA Line 0303 DRINFO most of the routine changed
+                   to 0335
+         Uade0D  Line 0152 check for : character removed as it was there twice
+         Uade0D  Line 0152 check for : character removed as it was there twice
+         Uade0D  Line 0415 Pseudo directory (%, &, @) switch
+                   to 0420 ]
+         Uade0D  Line 0517 Pseudo directory (%, &, @) switch
+                   to 0523 ]
+         Uade0D  Line 0535 Pseudo directory (%, &, @) switch
+                   to 0540 ]
+01/06/88 Uade0D  Line 0573 compatibility for "^" ?         
+01/06/88 Uade0D  Line 0577 code optimisation, no longer required        
+
+         Uade0DA Line 0145 Code for RETPAR changed around in order of 
+         Uade0DA   to 0191 execution.
+         Uade0DA Line 0535 Pseudo directory (%, &, @) switch
+                   to 0540 ]
+         Uade0DA Line 0865
+                   to 0912
+
+         Uade0E  Line 0377 OUTZRO routine removed
+24/02/88 Uade0E  Line 0460 ensure only the day of the month is output
+         Uade0E  Line 0461
+         Uade0E  Line 0467
+         Uade0E  Line 0468 set the value for the year
+                   to 0471 
+         Uade0E  Line 0482
+24/02/88 Uade0E  Line 0489 ensure year 20xx compatable
+                   to 0492
+         Uade0E  Line 0512 code optimised for character conversion
+         Uade0E  Line 0526 Jump label OUTACA removed
+         Uade0E  Line 0576 Jump label OUTSZA removed
+
+01/06/88 Uade0EA Line 0082 check entry code and update header 
+01/06/88 Uade0EA Line 0106 Check if preserve only, update header
+                   to 0122 routine
+
+AUTMAN
+22/03/88 Uade0F  Line 0084 code moved to subroutine ATOPWF
+22/03/88 Uade0F  Line 0181 new subroutine ATOPWF
+                   to 0206
+22/03/88 Uade0F  Line 0334 use subroutine ATOPWF to check PW file
+22/03/88 Uade0F  Line 0534 use subroutine ATOPWF to check PW file
+
+         Uade0FA Line 0213 RTS added
+         Uade0FA Line 0282 check removed for alternative RC
+                   to 0288
+01/06/88 Uade0FA Line 0413 
+                   to 0417
+01/06/88 Uade0FA Line 0448 code to look for runnimg over page boundary removed
+01/06/88 Uade0FA Line 0455 check if the password file will be too big before 
+                   to 0457 trying to enlarge it
+01/06/88 Uade0FA Line 0478 add test for end of file
+                   to 0483 
+         Uade0FA Line 0504 code optimised to check for end of PW file
+                   to 0509
+01/06/88 Uade0FA Line 0543 check if the password file will be too big before
+                   to 0549 trying to enlarge it
+                 Line 0572 
+                 
+MAPMAN
+24/02/88 Uade10  Line 0101 check added for write protect
+                   to 0102
+
+01/07/88 Uade10A  Line 0418 code optimisation. keep a copy of the map block
+                  Line 0422 pointer on the stack
+01/07/88 Uade10A  Line 0434 and use it instead of making the calculation again
+                   to 0437  
+         Uade10A Line 0533 Code optimised with temp variables no longer being zero'ed
+
+         Uade10A  Line 0568 Code optimised to save having to get the drive 
+         Uade10A  Line 0573 number twice
+05/03/88 Uade10A  Line 0597 code moved to a new subroutine MPRESZ
+05/03/88 Uade10A  Line 0621 new subroutine MPRESZ from previous code
+                    to 0646 
+
+MAPMAN UTILITIES
+06/07/88 Uade11  Line 0069 check if disc needs to be mounted
+                   to 0076
+05/03/88 Uade11  Line 0094 code optimised to use the new routine MPRESZ
+06/07/88 Uade11  Line 0125 
+                   to 0129
+06/07/88 Uade11  Line 0408 JSR USRERR replaced by JSR INTERR
+01/07/88 Uade11  Line 0499 code replaced by subroutine SETMB
+01/07/88 Uade11A Line 0072 Get Cylinder Map position routine chnaged
+                   to 0081
+
+MAPMAN UTILITIES II
+         Uade12  Line 0051 
+         Uade12  Line 0058 code optimised. Setting command 8 moved up to here
+                   to 0059
+         Uade12  Line 0070
+                   to 0072
+         Uade12  Line 0098
+         Uade12  Line 0265 bugfix: ensure carry is cleared
+01/07/88 Uade12  Line 0584 optimise ABLKS
+                   to 0595
+         Uade12  Line 0636 routine ABSALL removed as is now in routine ABLKS
+
+         Uade13  Line 0018 optimise code. No need to clear drive number in X
+23/03/88 Uade13  Line 0789 Bypass (C)Acorn hard drive check
+                   to 0791
+01/08/88 Uade13  Line 0829 Set drive number
+                 Line 0833 Use different memory area
+                 Line 0837 Use different memory area
+06/07/88 Uade13  Line 0838 bugfix: don't overlay sector zero on restart
+         Uade13  Line 0849 Use different memory area
+                   to 0853
+         Uade13  Line 0912 Use INTERR instead of USRERR
+29/04/88 Uade13  Line 0978 Remove code and zero DCSTAD
+                   to 0998 
+29/04/88 Uade13  Line 1013 Remove code
+                   to 1024 
+
+DSCMAN
+29/02/88 Uade14  Line 0053 optimise code. use stack
+                   to 0058
+12/07/88 Uade14  Line 0457 copy disc address for error reporting
+                   to 0461
+24/02/88 Uade14  Line 0508 routine Testdv, mainly to check for write protect
+                   to 0522
+
+COMMAND PROCESSOR
+06/07/88 Uade15  Line 0088 Ignore error if removable disc is unavailable
+                   to 0094 Use INTERR instead of USRERR
+08/02/88 Uade15  Line 0332 comment added PRPAGE NOT TRANSLATED TO ITALIAN
+08/02/88 Uade15  Line 0352 comment added NOMEDISC NOT TRANSLATED TO ITALIAN?
+         Uade15A Line 0026 add error reporting string SIN=
+                   to 0029
+01/06/88 Uade15A Line 0044 add support to reset the error report
+07/07/88           to 0049 & in user mode
+01/06/88           to 0064 in maintenance mode for privileged user
+         Uade15A Line 0085 support change in message length
+22/03/88 Uade15A Line 0390 add support to rename a disc in maintenance mode
+                   to 0476
+
+08/02/88 Uade16  Line 0028 SAVE Routine changes
+                   to 0088 
+         Uade16  Line 0331 Pseudo directory (%, &, @) switch
+                   to 0335 ]
+         Uade16A Line 0027 Pseudo directory (%, &, @) switch
+                   to 0031 ]
+         Uade19  Line 0591 code optimisation and moved to RMSUBR
+                   to 0592
+         Uade19  Line 0705 new subroutine RMSUBR
+                   to 0732
+                   
+22/03/88 Uade20A Line 0153 bugfix.
+
+PRINT
+08/02/88 PRINT0  Line 0040 check for trailer banner suppress state
+                   to 0043
+20/05/87 PRINT0  Line 0269 
+                   to 0271
+08/02/88 PRINT0  Line 0495 add option for a single Form Feed as a trailer banner 
+                   to 0522
+     
+FORMAT
+        FORM00  Line 0029 multiple lines of code removed
+        FORM00  Line 0048 JMP COMRTS removed
+        FORM00  Line 0245 image format changes
+        FORM00  Line 0257
+        FORM00  Line 0260
+        FORM00  Line 0265
+        FORM00  Line 0269
+                  to 0280
+        FORM00  Line 0283
+        FORM00  Line 0303
+        FORM00  Line 0402
+                  to 0406

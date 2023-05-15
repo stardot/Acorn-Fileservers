@@ -1,0 +1,368 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS02
+ TTL File server file MOS02
+
+;*********************************
+;*    H E A D E R  F I L E  2    *
+;*********************************
+
+; Memory Maps
+START * &200       ; Execution address for FS code
+
+; MOS Workspace
+HIMEM * &E600      ; FIRST FREE STORE LOCATION
+
+
+;*********************************
+; Page ZERO
+
+; Debug locations
+ ^ &0
+COPYA  # 1         ; copy of the A Register
+COPYX  # 1         ; copy of the X Register
+COPYY  # 1         ; copy of the Y Register
+COPYST # 1         ; copy of the Stack Pointer
+CPYIFR # 1         ; copy of the VIA IFR Reg at interrupt
+CPYRTC # 1         ; copy of the RTC Register C interrupt
+CPYHDS # 1         ; copy of the HD Status Reg at interrupt
+CPYIC  # 1         ; copy of interrupt counter
+CPYSR1 # 1         ; copy of 6854 Status Reg 1
+CPYSR2 # 1         ; copy of 6854 Status Reg 2
+DBDRIV # 1         ; drive number
+DBTRCK # 1         ; track number to read
+YEAR   # 1         ; copy of year
+SRSTCT # 1         ; Soft Reset Counter
+INTOVR # 1         ; Interrupt depth overrun limiter
+INTCNT # 1         ; Interrupt depth counter
+
+
+;*********************************
+; &10 - &8F reserved for fileserver
+
+
+;*********************************
+; &90 - &9F Econet workspace
+
+SCOUTB * &90 ; SCOUT RECEIVE BUFFER LOCATION
+SBSRLO * SCOUTB +SRLO 
+SBSRHI * SCOUTB +SRHI 
+SBCNTL * SCOUTB +CNTL  ;ZERO FOR IMMEDIATE OPERATIONS
+SBPORT * SCOUTB +PORTn
+SBADT1 * SCOUTB +ADTO1
+SBADT2 * SCOUTB +ADTO2
+SBADT3 * SCOUTB +ADTO3
+SBADT4 * SCOUTB +ADTO4
+SBADF1 * SCOUTB +ADFR1
+SBADF2 * SCOUTB +ADFR2
+SBADF3 * SCOUTB +ADFR3
+SBADF4 * SCOUTB +ADFR4
+
+TXCLR1 * &9C       ; FLAGS WHETHER CLEAR FOR USER TO TX
+IMASK  * &9D       ; IMMEDIATE OPERATION MASK PERMIT IMMEDIATE OPERATIONS
+MASKST * &9E       ; STORES VALUE OF IM PROT MASK WHEN JSR
+SSTATE * &9F       ; STATION STATE CONTROL BLOCKS EXIST
+
+
+;*********************************
+; &A0 - &AF Econet workspace
+
+ ^ &A0
+NMINET # 2         ; address of current network NMI handler
+NMIFD  # 2         ; address of current floppy drive NMI handler
+MSTATE # 1         ; Copy of the current machine state
+
+CNTLSB # 1         ; 3 byte loop counter
+CNTCSB # 1
+CNTMSB # 1
+
+TXCBPT # 2         ; TX CNTRL BLOCK POINTER. ONE BLOCK ONLY
+TXYOFF # 1         ; Y INDEX OF DATA TO TX
+TXPAGE # 1         ; NUMBER OF PAGES TO TX
+TXDAPT # 2         ; 16 BIT POINTER OF DATA TO TX
+
+RXYOFF * TXYOFF    ; Y INDEX OF DATA TO RX
+RXPAGE * TXPAGE    ; NUMBER OF PAGES TO RX
+RXDAPT * TXDAPT    ; 16 BIT POINTER OF DATA TO RX
+RXCBPT # 2         ; RX CNTRL BLOCK POINTER. POINTS TO ARRAY OF CNTRL BLOCKS
+
+;*********************************
+; Page B reserved for fileserver
+
+;*********************************
+; &C0 - &CF Econet workspace
+ ^ &C0
+TXCB    # &E       ; TX CONTROL BLOCK
+WORKP1  # 2        ; pointer to workarea
+
+
+;*********************************
+; &D0 - &D1 OSWORD PTR
+; &D2 - &DF Econet Workspace
+
+ ^ &D0
+PARAMP # 2 ;PTR TO OSWORD PARAMTER CONTROL BLOCK
+TXBUFl # 2 ; &D2 ;SCOUT TRANSMIT BUFFER
+TXDELO * TXBUFl +&00
+TXDEHI * TXBUFl +&01
+TXSRLO * TXBUFl +&02 ; <-stn ID
+TXSRHI * TXBUFl +&03
+TXCNTL * TXBUFl +&04
+TXPORT * TXBUFl +&05
+TXADRT * TXBUFl +&06
+TXADRF * TXBUFl +&0A
+STNID  * TXBUFl +&02 ; store copy of CMOS STN ID
+
+;*********************************
+; Page &D-&E Floppy disk workspace
+
+ ^ &E0
+DISCCB # &D        ; Floppy Disc Control Block
+SECTHI # 2         ; Drive X Sectors high byte
+SECTLO # 2         ; Drive X Sectors low byte
+SECTMI # 2         ; Drive X Sectors mid byte
+SIDE   # 1         ; Side
+TRACK  # 1         ; Track
+SECCNT # 1         ; Sector Count
+BUFLEN # 2         ; Length Hi/Lo
+DRIVE  # 1
+DxTRCK # 2         ; Drive X track number
+DxSIDE # 1         ; Floppy side select
+PHYSEC # 1
+RETRYS # 1         ; retry counter
+HDSR   # 1         ; copy of the HD Status Register
+ [ DEBUG = TRUE
+ FDCCMD # 1
+ ]
+ 
+;OSWORD &72 commands &D (Set Paramaters), &E (Verify) and &F (Format), 
+;use the control block differently from the sector read/write commands
+;and reuse the above SECTHI, SECTLO and SECTMI differently
+
+FSIDES * SECTHI    ; Number of sides
+FSECTR * SECTMI    ; sectors per track
+FCYLIN * SECTLO    ; total tracks (cylinders)
+
+; *******************************************************************
+; Page &200 to 85xx used by Fileserver code 85A0 is the start of
+; Fileserver dynamic workspace
+
+DYNVC1 * &89E4 ; DYNAMIC WORKSPACE
+
+
+
+; *******************************************************************
+; START of MOS Workspace area
+;
+; PAGE &E600
+
+ ^ HIMEM
+NSTATE # 1         ; NETWORK STATUS BITS INDICATE STATE
+ENTXCT # 1         ; END COUNT OF TX PACKET
+TXCNT  # 1         ; COUNT FOR TX SCOUT PACKET
+TXLINK # 2         ; TRANSMIT SUBROUTINE LINKAGE
+IRQSTR # 7         ; IRQ STORE FOR VARIABLES COS ITS SLOW 7 bytes
+                   ; +0 Scout Control byte <ROL 
+                   ; +1 ADT1 from Scout Buffer
+                   ; +2
+                   ; +3 Scout buffer parameter size
+                   ; +4 Scout receive buffer location
+                   ; +5 calling station number
+                   
+ ^ HIMEM+&89 
+RXCB # RxBLEN*RXBCNT ; RX buffer spans the page
+
+; *******************************************************************
+; PAGE &E700
+
+RXEOB  # 1            ; End of buffer byte. Set at 0
+DATE   # 5            ; Date and time values - 5 bytes
+HRS    * DATE+2       ; 
+MINS   * DATE+3       ; 
+SECS   * DATE+4       ; 
+TIMER  # 5            ; 5 byte counter in 1/100th second
+VSTATE # 1            ; Last VIA interrupt setting
+RTCFS  # 1            ; Station ID
+PBNEXT # 1            ; next char to print from buffer
+PBPTR  # 1            ; pointer to next slot in printer buffer
+PBUFF  # 1            ; printer buffer queue
+PSIZE  * HRESET-PBUFF ; rest of space to MOS code for printer buffer (90 bytes)
+
+
+
+; M A N I F E S T S
+
+; *******************************************************************
+; *                FC00 - FCFF Memory mapped hardware               *
+; *******************************************************************
+
+
+; *******************************************************************
+;                  RTC 146818
+;
+; Memory : &FC00 - &FC04
+; *******************************************************************
+
+RTCadd * &FC00     ; RTC address register
+RTCdat * &FC04     ; RTC data register
+
+
+; *******************************************************************
+;                  EPROM/RAM Switch & MACHINE STATE
+;
+; Memory : &FC08
+;
+; READ 
+; A read at this location causes the hardware to switch all future 
+; reads to RAM locations instead of the EPROM
+; WRITE Miscellaneous functions latch 
+;    bit 0  Floppy 1 (left) select 
+;    bit 1  Floppy 2 (right) select 
+;    bit 2  Floppy side (0|1) select 
+;    bit 3  Access to NVRAM possible if set 
+;    bit 4  FDC Disc Density (active low) 
+;    bit 5  FDC MasterReset (active low) 
+;    bit 6  FDC Test (active low) 
+;    bit 7  Mode (red) LED 
+; *******************************************************************
+
+ROMSWW * &FC08 ;ROM SWITCH WRITE LOCATION
+
+DRV1   * &01       ; Floppy 1 (left) select 
+DRV2   * &02       ; Floppy 2 (right) select 
+FDSSEL * &04       ; Floppy side (0|1) select
+NVRAM  * &08       ; Access to NVRAM possible if set
+FDCDEN * &10       ; FDC Disc Density (active low) 
+FDCRST * &20       ; FDC MasterReset (active low) 
+FDCTST * &40       ; FDC Test (active low)
+LED    * &80       ; Mode (red) LED
+
+
+; *******************************************************************
+;                  Floppy Disc Controller 2793
+; 
+; Memory : &FC0C - &FC0F
+; set to support 250Kbps data transfer and MFM encoding.
+; *******************************************************************
+
+FDCS   * &FC0C     ; Read Status Reg
+FDCC   * &FC0C     ; Write Command Reg
+FDCTRK * &FC0D     ; Track Reg
+FDCSEC * &FC0E     ; Sector Reg
+FDCD   * &FC0F     ; Data Reg
+
+
+; *******************************************************************
+;                  VIA - 6522
+; 
+; Memory : &FC10 - &FC1F
+;
+; E01 PA0-PA7 Printer
+;     CA1 Printer pin1  STROBE   CA1 & CA2 are incorrectly transposed
+;     CA2 Printer pin19 GND      on the circuit diagram
+;     PB0-PB7 User Port          only the data lines are connected to 
+;                                a header space on the PCB
+;     CB2 Network Clock
+;
+; E01S
+; As E01 without PB0-PB7
+; *******************************************************************
+
+VIA  * &FC10
+OUTA * 1           ; VIA Data out Register A
+DDRA * 3           ; VIA DDRA Data Direction Register A
+T1CL * 4           ; VIA T1 Low-Order Latches | T1 Low-Order Counter
+T1HI * 5           ; VIA Timer1 High-Order Counter
+AUX  * &B          ; VIA Auxiliary Control Register
+PCR  * &C          ; VIA Program Control Register
+IFR  * &D          ; VIA Interrupt Flag Register
+IER  * &E          ; VIA Interrupt Enable Register
+
+
+; *******************************************************************
+;                  Econet Interface 6854 ADLC
+;
+; Memory : &FC20 - &FC23
+;          &FC24 - Interrupt Off
+;          &FC28 - Interrupt On         
+; *******************************************************************
+
+ADLC   * &FC20 ;6854 SERIAL CONTROL CHIP LOCATION
+
+CReg1  * ADLC +&00 ; CONTROL REGISTER 1  C1B0=X
+CReg2  * ADLC +&01 ; CONTROL REGISTER 2  C1B0=0
+CReg3  * ADLC +&01 ; CONTROL REGISTER 3  C1B0=1
+CReg4  * ADLC +&03 ; CONTROL REGISTER 4  C1B0=1
+SReg1  * ADLC +&00 ; STATUS REGISTER 1   C1B0=X
+SReg2  * ADLC +&01 ; STATUS REGISTER 2   C1B0=X
+RXBYTE * ADLC +&02 ; RECEIVE BYTE        C1B0=X
+TXBYTE * ADLC +&02 ; TRANSMIT NEXT BYTE  C1B0=X
+TXLAST * ADLC +&03 ; TRANSMIT LAST BYTE  C1B0=0
+
+;STATUS REGISTER A EVENT CONSTANTS
+S2RQ   * &02       ; STATUS REGISTER 2 REQUEST
+FD     * &08       ; FLAG DETECT
+CTS    * &10       ; CLEAR TO SEND
+TDRA   * &40       ; TRANSMIT DATA REGISTER AVAILABLE
+
+;STATUS REGISTER B EVENT CONSTANTS
+AP     * &01       ; ADDRESS PRESENT
+FV     * &02       ; FRAME VALID
+RXIDLE * &04       ; INACTIVE IDLE RECEIVED
+CRC    * &10       ; FRAME CHECKSUM ERROR
+DCD    * &20       ; DATA CARRIER DETECT
+RDA    * &80       ; RECEIVE DATA AVAILABLE
+
+
+; Network Interrupt 
+INTOFF * &FC24     ;INTERUPT DISABLE ADDRESS
+INTON  * &FC28     ;INTERUPT ENABLE ADDRESS
+
+
+; *******************************************************************
+;                  Front panel switch
+;
+; Memory : &FC2C[- &FC2F] 
+; Door status, present on bit 6
+; E01 has a SW3 on bit 7 for command mode not present on E01S
+; *******************************************************************
+
+FPSWTCH * &FC2C    ; Front Panel Switch
+
+
+; *******************************************************************
+;                  SCSI hardware
+;
+; Memory : &FC30-&FC33 FileStore expansion bus interface. 
+;
+; Strapped to emulate bus address &40.
+; The bottom two bits of the &FC3x address indicate bus &4x.
+
+;        Address Read    Write
+
+;        &FC30   data    data (buffered)
+;        &FC31   status  -
+;                        bit 0  Message
+;                        bit 1  Busy
+;                        bit 2  - (low)
+;                        bit 3  - (low)
+;                        bit 4  !IRQ
+;                        bit 5  Request
+;                        bit 6  Input/Output
+;                        bit 7  Command/Data
+
+;        &FC32   -       select
+;        &FC33   -       enable IRQ
+;                        0 -  Disable
+;                        1 -  Enable
+; *******************************************************************
+
+HDData  * &FC30
+HDStat  * &FC31    ; Read HD Status
+HDSel   * &FC32    ; HD Select
+HDIRQ   * &FC33    ; HD IRQ
+                   ;    0 Disable
+                   ;    1 Enable
+
+
+
+
+ LNK MOS03

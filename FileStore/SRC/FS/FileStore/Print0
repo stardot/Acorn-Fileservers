@@ -1,0 +1,524 @@
+ OPT PRINT0 ;FILE > Print0
+ TTL Print server file Print0
+
+; PRWAIT macro enables the printer server to exit to the fileserver
+; when it wishes to wait or loop.  The fileserver returns to the point
+; after the call of PRWAIT when it next has nothing to do.
+
+ MACRO
+$label PRWAIT $last="0"
+ [ :MSB:$last = :MSB:(.+5) ; short form if same page
+$label LDAIM :LSB:(.+5)
+ JMP PRwat1
+ |
+$label LDAIM :LSB:(.+7)
+ LDYIM :MSB:(.+5)
+ JMP PRwait
+ ]
+ MEND
+
+; Initial entry from fileserver setup.  No variables yet initialized,
+; All printserver exits (except initial) are to COMRTS in the command section;
+; all subsequent calls on the print server are via JMI PRJUMP.  
+
+
+Prtime * Cozero ;Timer work CB
+
+Pstart ROUT
+ STZ Pstate ;Mark not busy
+ STZ Lastin ;No previous station
+ STZ Lastch ;No previous char to printer
+ STZ Prpoll ;No POLLPS RECEIVE CB current
+ STZ Prxcb ;No printer RECEIVE CB current
+
+ LDXIM Praddr ;Read any preset printserver name
+00 JSR OSrdad ;from non-volatile memory
+ STAAX Printn-Praddr
+ INX
+ CPXIM Praddr+6
+ BCC #00
+ LDXIM PRnoFF ;**8/2/88** read trailer banner suppress state
+ JSR OSrdad
+ STA PRnotb
+ LDAIM :LSB:#10 ;prime initial entry from commutator
+ STA Prjump
+ LDAIM :MSB:#10
+ STA Prjump+1
+ RTS ;finished init
+
+05 JSR Prxcbi ;Issue receive for printer rxcb
+ STA Prxcb ;Save CB number
+10
+ PRWAIT 0
+ LDA Prxcb ;check if rxcb queued
+ BEQ #05
+ LDAIM &33
+ LDX Prxcb
+ JSR OSbyte ;See if receive satisfied
+ TXA
+ BMI #20 ;and br if so to process
+
+ BIT Pstate ;else see if busy
+ BPL #10 ;br if not
+ LDXIM :LSB:Prtime
+ LDYIM :MSB:Prtime
+ LDAIM 3
+ JSR OSword ;read interval timer
+ LDA Prtime+1 ;in centiseconds
+ CMPIM :MSB:(Prtimo*100) ;approx check (range 3-655 secs)
+ BCC #10
+ STZ Pstate ;mark not busy if timed out
+ BRA #10
+ 
+20 LDAIM &11
+ LDXIM :LSB:Prxcb
+ LDYIM :MSB:Prxcb
+ JSR OSword ;Read receive control block
+ STZ Prxcb ;Mark CB not queued
+ LDA Printn ;**23/1/87** Test if printer disabled
+ BEQ #05 ;**23/1/87** and ignore block if so
+ LDA Pstate
+ BEQ #25 ;Br if idle
+ JSR Prchks ;Check if current station sent this
+ BNE #05 ;Ignore block if not
+ JSR Prstrt ;Check if start print block
+ BEQ #65 ; #30 to print pkt data
+22 LDA Prxcb+1 ;Else check sequence bit
+ EOR Lastct
+ RORA
+ BCS #40 ;Different, go print text
+ BRA #65 ;Same, ignore probable repeat
+
+25 LDAIM PRbusy ;Mark printer busy from idle
+ TSB Pstate
+ JSR Prstrt ;Check if start print block
+ BEQ #64 ;**1/6/87**
+ JSR Prchks ;Check if from last active station
+ BEQ #22 ;Yes, just continue print
+ STZ Pstate ;**1/6/87** idle again if wrong station
+
+30
+ PRWAIT #10
+ JSR PRspac ; read free buffer space
+ BEQ #30
+; LDAIM &0C ;printer header (more complicated later!)
+; JSR PRasci
+
+40 LDA Prxcb+5 ;check if more data to print
+ CMP Prxcb+9
+ BNE #45
+ LDA Prxcb+6
+ CMP Prxcb+10
+ BEQ #65 ;br if no more
+45 JSR PRspac ;Read print buffer space
+ BNE #55
+50
+ PRWAIT #10
+ BRA #45
+
+55 LDAI Prxcb+5 ;get next character
+ JSR PRasci
+60 INC Prxcb+5
+ BNE #40
+ INC Prxcb+6
+ BRA #40
+
+64 LDA Lastin ;**1/6/87** if previous station unterminated
+ BEQ #65
+ JSR PRfoot ;**1/6/87** print footer now
+65 LDA Prxcb+5 ;Prepare to return CB as acknowledge
+ CLC
+ ADCIM 1
+ STA Prxcb+9
+ LDA Prxcb+6
+ ADCIM 0
+ STA Prxcb+10 ;Make one byte length
+ LDAIM 0
+ STAI Prxcb+5 ;and send one zero byte
+ LDA Prxcb+1 ;save control byte
+ STA Lastct
+ STZ Pretry ;zero retry count
+75 LDA Lastct
+ STA Prxcb+1
+ LDXIM :LSB:(Prxcb+1)
+ LDYIM :MSB:(Prxcb+1)
+ LDAIM &10
+ JSR OSword ;Transmit CB
+80
+ PRWAIT 0
+ LDA Prxcb+1 ;Check transmitting
+ BEQ #75
+
+85
+ PRWAIT #80
+ LDAIM &32 ;Check transmit before proceeding
+ JSR OSbyte
+ TXA
+ BMI #85
+ BEQ #86 ;br if transmit ok
+ DEC Pretry ;else retry some times
+ BNE #75 ;before giving up
+
+86 LDA Prxcb+3 ;Save station as last
+ STA Lastin
+ LDA Prxcb+4
+ STA Lastin+1
+ LDA Prxcb+1 ;**20/5/87**
+ ANDIM MCtask
+ STA Lastin+2
+ JSR Pconnt ;refresh timeout
+ JSR Prxcbi ;Then reissue receive
+ STA Prxcb ;save CB number (or zero)
+ LDA Lastct ;See if this was end print buffer
+ BITIM &04
+ BEQ #87
+ JSR PRfoot ;**1/6/87** page footer and ...
+ STZ Lastin ;**1/6/87** no station active and ...
+ STZ Pstate ;Go idle if so
+87 JMP #10
+
+
+Pollps ROUT ;here every main idle cycle
+ LDX Prpoll ;see if POLLPS action needed
+ BNE #15 ;br unless no RECEIVE issued
+ LDXIM 1 ;set up rxcb in fours
+ LDYIM &7F
+ LDAIM Prpolp
+ JSR Prxcbs ;zeros for wildcard station, net
+ LDYIM :LSB:Prwork
+ LDAIM :MSB:Prwork
+ JSR Prxcbs
+ LDYIM :LSB:(Prwork+8)
+ LDAIM :MSB:(Prwork+8)
+ JSR Prxcbs
+ JSR Prxcbj ;send off RECEIVE CB
+ STA Prpoll ;save CB number or zero
+10 RTS ;exit for now
+
+15 LDAIM &33 ;poll POLLPS CB
+ JSR OSbyte
+ TXA
+ BPL #10 ;br if still pending
+
+ LDA Rxcbn ;save main cb number
+ PHA
+ LDA Prpoll
+ STA Rxcbn
+ STZ Prpoll ;no block queued after this
+ LDAIM &11
+ LDXIM :LSB:Rxcbn
+ LDYIM :MSB:Rxcbn
+ JSR OSword ;read RECEIVE cb
+ PLA
+ STA Rxcbn ;restore CB number
+
+ LDA Printn ;**23/1/87** check if printer disabled
+ BEQ #10 ;**23/1/87** and ignore packet if so
+
+ LDAIM :LSB:(Prwork+8)
+ CMP CBbufe ;check exactly 8 bytes received
+ BNE #10 ;error if not
+
+ LDA Prwork+6 ;check request code
+ CMPIM 1 ;poll printserver?
+ BEQ #94
+ CMPIM 2 ;poll & connect (as poll)?
+ BEQ #94
+ CMPIM 6 ;read alternate name?
+ BNE #10 ;ignore all others pro tem
+
+ LDXIM 5 ;set up to reply alternate name
+ LDYIM :LSB:Printn
+ LDAIM :MSB:Printn
+ JSR Prxcbs
+ LDYIM :LSB:(Printn+6)
+ LDAIM :MSB:(Printn+6)
+92 JSR Prxcbs
+ LDAIM Prpolr
+ STA CBport ;set reply port
+ LDY Qptr ;use main SEND routine
+ JMP Send ;which does it all for us
+
+94 LDXIM :LSB:Pollpn
+ LDYIM :MSB:Pollpn
+ JSR #97 ;try to match main name
+ BEQ #95
+ LDXIM :LSB:Printn
+ LDYIM :MSB:Printn
+ JSR #97 ;try to match user-defined name
+ BNE #10 ;failed, ignore
+95 STZ Prwork ;set up reply in work store
+ STZ Prwork+1
+ STZ Prwork+2
+ STZ Prwork+3
+ LDA Pstate ;see if busy
+ BNE #89
+ JSR PRspac ;idle, test if jammed
+ BNE #88 ;br if not
+ LDAIM 2 ;jammed code
+ STA Prwork
+ BRA #96
+
+88 LDA Prwork+6 ;Poll & connect?
+ CMPIM 2
+ BNE #96
+ LDA CBstid ;Yes, save station as last
+ STA Lastin
+ LDA CBstid+1
+ STA Lastin+1
+ LDA CBflg ;**20/5/87**
+ ANDIM MCtask
+ STA Lastin+2
+ JSR Pconnt ;refresh timer
+ LDAIM Prbusy ;and mark busy
+ TSB Pstate
+ BRA #96 
+
+89 INC Prwork ;mark reply if so
+ LDA Lastin
+ STA Prwork+1
+ LDA Lastin+1
+ STA Prwork+2
+ LDA Lastin+2
+ STA Prwork+3
+96 LDXIM 9
+ LDYIM :LSB:(Prwork+3)
+ LDAIM :MSB:(Prwork+3)
+ BRA #92 ;go send reply 
+
+97 STX Cozero ;compare X,Y against Prwork
+ STY Cozero+1 ;in either case
+ LDYIM 5
+98 LDAAY Prwork
+ EORIY Cozero
+ ANDIM &DF
+ BNE #99
+ DEY
+ BPL #98
+ TAY ;set Z if match
+99 RTS
+
+Pollpn = "PRINT",0
+
+; Refresh timer
+
+Pconnt ROUT
+ LDXIM 4
+82 STZAX Prtime ;reset interval timer to zero
+ DEX
+ BPL #82
+ LDXIM :LSB:Prtime
+ LDYIM :MSB:Prtime
+ LDAIM 4
+ JMP OSword
+
+; Print page footer
+
+PRfoot ROUT
+ LDA PRnotb ;**8/2/88** See if trailer suppressed
+ BNE #10
+ LDAIM &0C ;and send formfeed FOOTER (may get worse)
+ CMP Lastch ;unless already done in data stream
+ BEQ #10
+ JSR PRasci
+10 RTS
+
+; Issue Receive CB for printer
+
+Prxcbi ROUT
+ LDXIM 1
+ LDYIM &7F
+ LDAIM Prport ;Receive on this port
+ JSR Prxcbs ;Wildcard station (any)
+ LDYIM :LSB:Prdata
+ LDAIM :MSB:Prdata
+ JSR Prxcbs
+ LDYIM :LSB:(Prdata+Prlong)
+ LDAIM :MSB:(Prdata+Prlong)
+ JSR Prxcbs
+Prxcbj LDA Rxcbn ;save main CB number
+ PHA
+ STZ Rxcbn ;for CB number
+ LDXIM :LSB:Rxcbn
+ LDYIM :MSB:Rxcbn
+ LDAIM &11
+ JSR OSword ;there it goes
+ PLX
+ LDA Rxcbn ;get new CB number or zero
+ STX Rxcbn ;restore main CB number
+ RTS
+
+Prxcbs PHA ;store Y,A,0,0 at Rxcbn+X...
+ TYA
+ STAAX Rxcbn
+ PLA
+ INX ;and increment X
+ STAAX Rxcbn
+ INX
+ STZAX Rxcbn ;high order address zero
+ INX
+ STZAX Rxcbn
+ INX
+ RTS
+
+; PRspac tests free space and returns Z set if none
+
+PRspac ROUT
+ LDAIM 128 ;Read print buffer space
+ LDXIM 252
+ JSR OSbyte
+ TXA
+ RTS
+
+ [ 1=0
+; The fileserver can request a printserver shutdown by calling the PRstop
+; entry.  This cancels any pending RECEIVE blocks (but does nothing more
+; orderly than that at present).
+
+; PRstop - shuts down print server
+
+PRstop ROUT
+ LDX Prxcb ;any RECEIVE block queued?
+ BEQ #10
+ JSR #20 ;yes, cancel it
+10 LDX Prpoll ;any RECEIVE block for POLLPS?
+ BEQ #30
+ STZ Prpoll ;mark none now
+20 LDAIM &34 ;cancel CB
+ JSR OSbyte
+30 RTS
+ ]
+
+; Send char A to printer
+
+PRasci ROUT
+ STA Lastch
+ JMP OSwrch
+
+; Record next printserver entry point and return to fileserver
+
+PRwait STY Prjump+1 ;both bytes if entered here
+PRwat1 STA Prjump ;lsb only if entered here
+ JMP Comrts ;return to fileserver
+
+; Check if new buffer from previously active station
+; Returns with Z set appropriately
+
+Prchks ROUT
+ LDA Prxcb+3 ;new station
+ CMP Lastin
+ BNE #10
+ LDA Prxcb+4
+ CMP Lastin+1
+ BNE #10 ;**20/5/87**
+ LDA Prxcb+1
+ ANDIM MCtask
+ CMP Lastin+2
+10 RTS
+
+; Check if new buffer is a "start print" buffer.  Returns Z set if so.
+
+Prstrt ROUT
+ LDA Prxcb+1 ;get control byte
+ BITIM &02 ;is it a control buffer at all
+ BEQ #10
+ BITIM &04 ;yes, is it "end print"
+ BEQ #20 ;no, so IS start print
+ LDA Prxcb+9 ;endprint, remove trailing CTRL-C
+ BNE #00
+ DEC Prxcb+10
+00 DEC Prxcb+9
+ LDAI Prxcb+9
+ CMPIM &03 ;check CTRL-C
+ BEQ #10 ;removed now
+ INC Prxcb+9 ;not CTRL-C, better restore
+ BNE #10
+ INC Prxcb+10
+10 LDAIM &FF ;clear Z
+20 RTS
+
+; PRNAME - enables an authorised used to set a 6-char printer alias.
+; for entry and exit details see COMRTS
+
+Prerrm = "Bad printer name",CR
+Prerrn * .-Prerrm
+
+Prname ROUT
+ STZ Txtbuf+7 ;Terminator and length check
+ JSR Buftxt ;Read name into TXTBUF
+ BNE #70
+ JSR Comend
+ BNE #70
+ LDA Txtbuf+7 ;Check length
+ BEQ #10
+ LDAIM Prerrl
+ STA RTcode ; error if too long
+ LDXIM 0
+00 INX
+ LDAAX Prerrm-1
+ STAAX Midtx-1
+ CMPIM CR
+ BNE #00
+ LDAIM Prerrn+Txhdr ; length
+ STZ Ccode
+ JSR Reply
+ BRA #70 
+
+10 JSR Getuse ;Get user CB
+ BNE #70
+ LDYIM Utpriv ;Check privilege
+ LDAIY Ustptr
+ ANDIM Systpv
+ BNE #20
+15 LDAIM Aterrd
+ JMP Error
+
+20 LDXIM Praddr ;Set printserver name
+30 LDAAX Txtbuf-Praddr ;Copy name
+ BEQ #50
+ CMPIM CR ;Up to null or CR
+ BNE #50
+ LDAIM 0
+50 STAAX Printn-Praddr ;and instore copy
+ JSR OSwrad ;Write alternate memory
+ INX
+ CPXIM Praddr+6
+ BCS #60
+ TAY ;propagate end if found
+ BEQ #50
+ BRA #30 ;else continue copy
+
+60 LDAIM 0
+ JSR Rcode ;Null reply
+70 JMP Comrts
+
+; PRPAGE Y/N permits or suppresses the trailer banner
+; which is currently a single FF
+
+PRPAGE ;**8/2/88** command added
+ BIT Cmndsw ;Maintenance mode is ok
+ BMI #80
+ STY Bptr
+ JSR Getuse ;get user details
+ BNE #70
+ LDYIM Utpriv
+ LDAIY Ustptr ;this guy better be privileged
+ ANDIM Systpv
+ BEQ #15 ;else reject command
+ LDY Bptr
+80 JSR Spaces ;find argument
+ ANDIM &DF
+ CMPIM "N"
+ BEQ #90
+ CMPIM "Y"
+ BNE #95
+ LDAIM 0
+90 STA PRnotb ;set local flag
+ LDXIM PRnoFF ;and stash in non-volatile storage
+ JSR OSwrad
+ BRA #60
+
+95 LDAIM Woterr ;argument not Y or N
+ JMP Error
+
+ LNK FORM00

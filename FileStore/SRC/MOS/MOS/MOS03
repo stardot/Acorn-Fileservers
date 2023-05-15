@@ -1,0 +1,466 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS03
+ TTL File server file MOS03
+
+
+;MACRO
+
+ MACRO
+$label CPYROM $start,$end
+$label LCLA $addr
+
+$addr SETA $start
+ WHILE $addr < $end
+ LDAAX $addr
+ STAAX $addr
+$addr SETA $addr + &100 
+ WEND
+ MEND
+
+; used to fill blank bytes with &FF
+ MACRO
+$label xFILL $value,$end
+$label LCLA $addr
+
+$addr SETA 0
+ WHILE $addr < $end
+ = $value
+$addr SETA $addr + 1
+ WEND
+ MEND
+
+
+; Machine hardware reset
+
+HRESET ROUT
+ [ DEBUG = TRUE
+ PHP               ; Push CPU status to stack 
+ STAZ COPYA        ; store a copy of A
+ STXZ COPYX        ; store a copy of X
+ STYZ COPYY        ; store a copy of Y
+ TSX               ; Stack pointer to X
+ STX COPYST        ; store a copy of the stack pointer
+ ]
+
+ BIT INTOFF        ; Disable the network interrupt
+ LDAIM LEDON       ; +LED +FDCTST +FDCRST +FDCDEN -NVRAM -FDSSEL -DRV2 -DRV1
+ STA ROMSWW        ; write to hardware 
+ 
+; copy the firmware from EPROM to RAM
+
+ LDXIM 0           ; copy 256 bytes
+ 
+CPYMOS 
+ CPYROM &200, &7FFF
+ CPYROM &E800, &FBFF
+; miss memory mapped hardware at page &FC00 and
+; avoid &FC08 which would change the RAM selector switch prematurely
+ CPYROM &FD00, &FEFF
+ LDAAX &FF00
+ STAAX &FF00
+ 
+ DEX
+ BEQ #20           ; finished copying ROM to RAM?
+ JMP CPYMOS
+
+20 BIT ROMSWW      ; Read the selector switch at &FC08
+                   ; this changes reads from EPROM to RAM 
+                   ; effectively disabling the EPROM
+
+
+; change future resets to a soft reset
+ LDAIM :LSB:SRESET ; put the soft reset routine
+ STA RSTV          ; into the reset vector
+ LDAIM :MSB:SRESET
+ STA RSTV+1
+
+; Drop through to soft reset handler
+; soft reset without copying firmware
+
+SRESET
+ BIT INTOFF        ; Disable the network interrupt
+ SEI               ; set interrupt flag - prevent maskable interupts
+ CLD               ; ensure decimal flag is clear
+ LDXIM &FF         ; initialise the stack pointer
+ TXS
+ 
+ LDAIM &88         ; +LED +FDCTST +FDCRST +FDCDEN +NVRAM -FDSSEL -DRV2 -DRV1
+ STA ROMSWW        ; enable NVRAM access
+ 
+ LDAIM &A
+ STA RTCaddr       ; write RTC register A
+ LDAIM &26         ; -UIP +DV2 -DV1 -DV0 -RS3 +RS2 +RS1 -RS0
+ STA RTCdata       ; 
+
+ LDAIM &B          ; write RTC register B
+ STA RTCaddr 
+ LDAIM &1E         ; -SET -PIE -AIE +UIE +SQWE +DM  +24/12 -DSE
+                   ; square mode enable, data mode binary, 24 hour DATE
+                   ; no daylight savings time
+ STA RTCdata
+ 
+; Initialise Server station ID from NVRAM
+ LDAIM STNIDS      ; offset of station number in NVRAM
+ STA RTCaddr
+ LDA RTCdata       ; read from NVRAM
+ STA STNID         ; save in memory
+ 
+ LDAIM STNIDS+1    ; station number control byte
+ STA RTCaddr
+ LDA RTCdata       ; read from NVRAM
+ 
+; turn off NVRAM access
+ LDXIM &80         ; +LED +FDCTST +FDCRST +FDCDEN -NVRAM -FDSSEL -DRV2 -DRV1
+ STX ROMSWW        ; disable NVRAM access
+ 
+ SEC               ; check the station number control byte
+ ADC STNID
+ BEQ #45           ; Does it match? continue
+ LDAIM FSDEF       ; otherwise it is corrupt so set to default
+ STA STNID
+45 STZ STNID+1     ; clear the control byte 
+ 
+; Initialise the VIA
+ STZ VIA + AUX     ; clear the AUX control register
+ STZ VIA + PCR     ; clear the Program control register
+ 
+ LDAIM &7F         ; bit 7=0 disable all interrupts
+ STA VIA + IER     ; -SET/CLR +TIMER1 +TIMER2 +CB1 +CB2 +SHIFT +CA1 +CA2
+ STA VIA + IFR     ; -SET/CLR +TIMER1 +TIMER2 +CB1 +CB2 +SHIFT +CA1 +CA2
+ JSR PCRINIT
+
+; Initialise the network
+ JSR CPINIT
+
+; clear the 2 pages of MOS work space
+; and zero page work space to &00
+
+ LDXIM 0
+50
+ STZAX HIMEM       ; MOS Workspace &E600-&E6FF
+ STZAX HIMEM +&100 ; MOS Workspace &E700-&E7FF
+ DEX
+ BNE #50
+ 
+; Initialise Econet workspace
+ LDAIM &3E         ; mask is usually &3F for protected systems
+ STA IMASK
+
+ LDAIM &80         ; set top bit of TX clear
+ STA TXCLR1        ; user clear to transmit
+
+ LDA STNID         ; station ID as read from CMOS
+ STA RTCFS         ; store a copy as file server ID
+ 
+ LDXIM RxBLEN*RXBCNT ; clear the RX Blocks
+ LDAIM RXCLR	     ; with deleted flag
+55
+ STAAX RXCB-1
+ DEX
+ BNE #55
+
+ LDAIM :LSB:REC    ; load address of the default Network NMI handler
+ STA NMINET	   ; update the Network NMI handler to the default
+ LDAIM :MSB:REC
+ STA NMINET+1
+ 
+ LDAIM &28         ; TO DO <why is this set to &28
+ STA INTOVR
+ LDAIM &FC         ; TO DO <why is this set to &FC
+ STA INTCNT
+ 
+ LDAIM :LSB:FDCNMD ; update the FDC NMI handler to the default
+ STA NMIFD
+ LDAIM :MSB:FDCNMD
+ STA NMIFD+1
+
+; initialise the FDC
+
+ LDAIM &E0         ; +LED -FDCTST -FDCRST -FDCDEN -NVRAM -FDSSEL -DRV2 -DRV1
+ STA ROMSWW        ; Set MODE LED on, clear FDC Test and FDC Reset clear
+ 
+ LDAIM &C0         ; +LED -FDCTST +FDCRST -FDCDEN -NVRAM -FDSSEL -DRV2 -DRV1
+ STA ROMSWW        ; Set MODE LED on, clear FDC Test, FDC reset active
+ 
+; allow a delay for the FDC to reset
+ LDAIM 25          ; delay for 25 * 5 cycles @ 2MHz = 62.5us
+60 DECA            ; 2 cycles
+  BNE #60          ; 3 cycles
+
+ LDAIM &E0         ; +LED -FDCTST -FDCRST -FDCDEN -NVRAM -FDSSEL -DRV2 -DRV1
+ STA MSTATE        ; store a copy of the intended state
+ STA ROMSWW        ; Set MODE LED on, clear FDC Test and FDC Reset clear
+ 
+ BIT FDCS          ; Read the FDC Status Register
+
+; set the floppy geometry
+ LDAIM &50
+ STA DxTRCK        ; Drive 0 Track number
+ STA DxTRCK + ONE  ; Drive 1 Track number
+ STA SECTLO        ; Drive 0 Sectors LSB
+ STA SECTLO + ONE  ; Drive 1 Sectors LSB
+ 
+ LDAIM 2
+ STA SECTHI        ; Drive 0 Sectors MSB
+ STA SECTHI + ONE  ; Drive 1 Sectors HSB
+ 
+ LDAIM &10
+ STA SECTMI        ; Drive 0 Sectors CSB
+ STA SECTMI + ONE  ; Drive 1 Sectors CSB
+ 
+ BIT INTON         ; enable Network IRQ
+ CLI               ; set interrupt flag - enable maskable interupts
+
+; output test string to printer
+
+ LDXIM 0           
+65 LDAAX PRNTST    ; get the string
+ BEQ #70           ; end of string signalled by 0x00?
+ JSR OSWRCH        ; otherwise write character to output stream
+ INX
+ BNE #65           ; fetch next char
+
+70 STZ SRSTCT      ; clear the soft reset counter
+
+ LDA #90           ; store JMP OPCODE at FFF7, before the 
+ STA SRSTV-1       ; Soft Reset vector
+
+ LDXIM :LSB:SRSETC ; routine to increase the Soft Reset Counter by 1
+ STX SRSTV         ; put in the Soft Reset Vector
+ LDXIM :MSB:SRSETC
+ STX SRSTV+1
+
+; simple test for code has downloaded from the FS ROM
+ CMP START         ; is JMP code at start of executable code
+ BEQ #85           ; yes, start up
+ 
+ STZ IMASK         ; no immediate operations
+; Flash LED every second
+75
+ LDA Secs          ; Seconds
+ RORA              ; set carry on/off depending on second
+ LDA MSTATE        ; get current state from memory
+ ANDIM LEDOFF      ; -LED FDCTST FDCRST FDCDEN NVRAM FDSSEL DRV2 DRV1
+ BCC #80           ; if seconds has changed, change LED status
+ ORAIM LEDON       ; +LED FDCTST FDCRST FDCDEN NVRAM FDSSEL DRV2 DRV1
+80
+ STA MSTATE        ; store a copy of the intended state
+ STA ROMSWW        ; set MODE LED to ON or OFF
+
+ LDA SRSTCT        ; is soft reset still clear?
+ BEQ #75           ; if 0, loop again
+
+ JSR #95
+ STZ SRSTCT        ; clear the soft reset counter
+ 
+ LDA MASKST        ; load the IM Protection mask value
+ STA IMASK         ; set the immediate operations allowed mask
+ BRA #75           ; flash LED
+
+; delay 
+85
+ LDA TIMER+1       ; 5 byte timer in 1/100th second, 
+ CMPIM 4           ; starts at 0, 
+ BCC #85
+
+90 
+ JMP START         ; start the File server code
+
+95
+ JMI IRQSTR + SIX  ; offset initialised at 00
+
+; increase the Soft Reset counter by 1
+SRSETC ROUT
+ INC SRSTCT
+ RTS
+
+;
+; ****** NEVER fall through here ************
+;
+
+
+;INITS ADLC CHIP
+CPINIT
+ LDAIM &C1    ;+TXRS +RXRS -FRDIS -TDSR -RDSR -TIE -RIE SELCR3
+ STA CReg1
+ LDAIM &1E    ;NRZ -ABTEX -ABT 8TX 8RX 8RX F
+ STA CReg4
+ STZ CReg2    ;-DTR *** NFS CODE was CReg3
+CPRST
+ LDAIM &82    ;+TXRS -RXRS -FRDISC -TDSR -RDSR -TIE +RIE SELCR2
+              ; Enable Rx Interrupt and Tx Reset 
+ STA CReg1
+ LDAIM &67    ;-RTS +CTXST +CRXST -TXLAST TDRA FLAG 2BYTE +PSE
+              ; Prioritized Status Enabled, 2 byte transfer
+ STA CReg2    ; Set Idle Flag, Clear Rx Tx status
+ RTS
+
+
+; Initialise the Peripheral control register 
+PCRINIT ROUT
+ LDAIM &E0         ; Initialise Peripheral control register
+                   ; CB2 Control = High Output
+                   ; CB1 Latch Ouput = Negative Active Edge
+                   ; CA2 Control = Input Negative Active Edge
+                   ; CA1 Latch Output = Negative Active Edge
+ TSB VIA +PCR      ; VIA PCR
+ LDAIM 50          ; delay for 50 * 5 cycles @ 2MHz = 125us
+10 DECA		   ; 2 cycles
+ BNE #10	   ; 3 cycles
+ 
+NETPOLL
+ LDA Sreg2
+ BITIM DCD         ; check for insertion of the DCD signal on the Econet module
+ BEQ #20
+
+; otherwise enable the automatic terminator/clock circuit via CB2 on the VIA
+ LDA VIA +PCR      ; VIA PCR
+ ANDIM &1F         ; 0001 1111
+                   ; keep current CA1 States
+                   ; keep current CB2 Latch/IRQ control  
+ ORAIM &C0         ; 1100 0000
+                   ; Set CB2 Control as low output
+ STA VIA +PCR      ; VIA PCR
+
+20 RTS
+
+
+
+; NMI Vector entry point
+; as defined at NMI vector &FFEA
+
+;
+
+; Upon an NMI, the network interrupt is disabled. The server looks to see if the ADLC
+; caused the interrupt. If it did, it is handled... If this is the first ADLC 
+; interrupt, we look to see if it is a scout packet. If it is and it is ours, we 
+; rewrite our NMI handler vector to point to a handler for ADLC data (as further data
+; will be a continuation, not a scout (actually this all happens in three stages, 
+; but the description is generally correct)). If not for us, we flag to discard the 
+; frame.
+; The FDC is then checked (the ADLC code will 'fall through' to check the FDC). 
+
+; I am still working on untangling the FDC interrupt code. It looks as if the 
+; default handler will read the FDC status in order to clear the interrupt, then 
+; ignore it. It is possible that this is what happens until such time as a disc 
+; operation actually takes place? 
+
+; Likewise, I am still working on how/where exactly the SCSI host adaptor fits into 
+; the equation. Upon a cursory examination (of the v1.31 firmware), it appears as if 
+; the SCSI system does not use IRQs. The IRQs appear to be disabled twice when 
+; checking for the hardware, and never re-enabled. In addition, it seems as if the 
+; server 'polls' the harddisc awaiting a result. Given the overheads of reading data 
+; from a harddisc under interrupt, and the fact that the harddisc, once data located, 
+; ought to be more or less able to keep up with the server, it would make more sense 
+; to simply poll for the reply.
+
+
+; Main interupt handler
+
+INT   ; NMI ints enter here program routed via rx/tx jump vector
+ = &CE, :LSB:INTCNT, :MSB:INTCNT ; DEC INTCNT
+ BIT INTOFF        ; Disable NMI interupt
+ BIT SReg1         ; is there a network interrupt?
+  
+ BPL FDCNMI        ; no, handle a FDC interrupt
+ PHA               ; Save acumulator
+ PHY               ; Save Y register
+ JMI NMINET        ; Jump to receive or transmit wait address              
+
+; Main routine that waits for tx interupt
+; Returns from one int waits for another tx interupt
+
+WRXINT             ; Saves rx jump address
+WTXINT             ; Saves tx jump address
+  STYZ NMINET+1
+WRXNTF             ; The fast version only stores the LOW byte
+WTXNTF
+  STAZ NMINET
+WRXIN2             ; Use same jump address as last time
+WTXIN2             ; Use same jump address as last time
+ PLY               ; Restore Y register
+ PLA               ; Restore accumulator
+
+FDCNMI
+ JMI NMIFD         ; Jump to receive or transmit wait address              
+FDCNMD             ; but is changed dynamically  
+ BIT FDCS  
+FDCINC             ; increment the interrupt depth counter
+ = &EE, :LSB:INTCNT, :MSB:INTCNT ;INC INTCNT
+ CMPI INTOVR
+ RTI               ; Return to user process
+
+; Decrease Interrupt Count
+INTCND
+ = &CE, :LSB:INTCNT, :MSB:INTCNT ;DEC INTCNT
+ BIT INTOFF        ; DISABLE NMI INTERUPT
+ RTS
+ 
+; Increase Interrupt Count ;ENABLE NMI INTERUPT
+INTCNU
+ = &EE, :LSB:INTCNT, :MSB:INTCNT ;INC INTCNT
+ CMPI INTOVR       ; 
+ RTS
+
+IRQ ROUT
+ PHA
+ 
+ [ DEBUG = TRUE
+ LDA VIA +IFR      ; store a copy of the Interrupt Flag Register
+ STA CPYIFR
+ LDA HDStat        ; store a copy of the HD Status
+ STA CPYHDS
+ ]
+ 
+ LDAIM &40         ; SET/CLR +TIMER1 TIMER2 CB1 CB2 SHIFT CA1 CA2
+ BIT VIA +IFR      ; is TIMER1 flag set in VIA
+ BEQ #30           ; yes, update running counter
+ PHX
+ PHY
+ STA VIA +IFR      ; SET/CLR +TIMER1 TIMER2 CB1 CB2 SHIFT CA1 CA2
+ STA VIA +IER      ; SET/CLR +TIMER1 TIMER2 CB1 CB2 SHIFT CA1 CA2
+ LDA IMASK         ; Get the permit immediate operation mask
+ STA MASKST        ; keep a copy
+ 
+ LDX IRQSTR        ; adjusted Scout Control byte
+ CPXIM &C          ; >=&C
+ BCS #10           
+ 
+ ORAIM &1C         ; set bits 4,3,2
+ STA IMASK         ; save bits 2,3,4
+10
+ JSR #40           ; immediate ops
+ LDA SRSTCT        ; A= Soft Reset Counter
+ BNE #20           
+ LDA MASKST        ; load the copy
+ STA IMASK         ; restore the original value
+20
+ PLY               ; restore Y & X
+ PLX
+
+30 
+ JSR RDTIME        ; get time and update the 5 byte counter
+ JSR PRNCHR        ; check for chars to print
+ PLA
+ RTI
+
+40
+ JMIX (EXITIM)     ; X=3 PROTECTED FROM IM OPERATION
+                   ; X=6 RXRTN2
+                   ; X=8 RXPRE2
+                   ; X=A RXPRE2
+                   ; X=C RXSTP2
+                   ; X=E RXSTR2
+                   
+PRNTST = &0D       ; printer test string
+MCPEEK = MCTYPE    ; this gives the M/C info.
+       = &00       ; always 0
+
+; convert characters to hex values for NFS version 
+
+       = (VERLB-&30)*&10+(VERLC-&30)
+                   ; NFS version low .xx
+
+       = VERLA-&30 ; NFS version high x.
+
+
+ LNK MOS04

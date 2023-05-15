@@ -1,0 +1,415 @@
+ OPT UADE16 ; > Uade16
+ TTL File server file UADE16
+
+;SAVE/LOAD/ ETC.
+
+;*************
+;*  S A V E  *
+;*************
+
+;1) Do FINDMC, get disc number from
+;DIRMAN file title -> disc number
+
+;2) Call CREATESPACE in MAPMAN using above args
+;and size given in operation request
+;for create goto 7
+;3) Send first reply
+;4) Receive blocks one at a time into big buffer
+;5) Write to disc (DSCMAN)
+;6) If disc error, continue to receive,
+;but set error flag
+;7) All received OK => call PRESERVE in DIRMAN
+;8) Send final return code
+;9) Possibly DELETE previous file from map,
+;flush from store and ensure map.
+
+;**8/2/88** Command level code deleted
+
+SAVE ROUT ; Also entered here for a CREATE 11/6/84 BC
+ JSR STKUSE ;Set m/c no. and call FINDMC
+ BNE #22 ;Fail, return
+
+ LDAIM 13 ;DIRMAN.CHECKPRES
+ JSR #95 ;**23/3/88** see if preserve will work
+ BNE #23
+
+ LDAIM &A ;File title -> disc number
+ JSR SETRTN
+ JSR STKUSA
+ LDAIM SAVFTO
+ JSR SETFTP
+ INY
+ LDAIM &80 ;no wild cards in last name
+ STAIY NEWARG
+
+ JSR DIRMAN ;Disc number on stack
+ BNE #23 ;**9/6/87**
+
+ LDX BPTR
+ LDYIM ARGD
+
+;Move size from message buffer to
+;arg. stack for create space call
+
+10 LDAAX MIDRX+8
+ STAIY NEWARG
+ INX
+ INY
+ CPYIM ARGD+3
+ BNE #10
+
+ DEY ;pass info @ ARGG,H
+ JSR SETUSE ;put userinfo on stack
+
+ LDAIM 1
+ JSR SETRTN
+
+ JSR MAPMAN  ;** CREATE SPACE **
+ BNE #23
+
+ LDXIM 4
+ LDYIM ARGF
+20 LDAIY NEWARG
+ STAAX DANDS ;Save disc. no. and SIN
+ DEY
+ DEX
+ BPL #20
+ 
+ ; New stuff for create 11/6/84 BC
+ LDX BPTR
+ LDAAX FCODE
+ EORIM FCCRET ; The function code for create
+ BNE #25
+ [ $CMOS
+ STZ CCODE ; Blat the command return code
+ |
+ LDAIM 0
+ STA CCODE ; Blat the command return code
+ ]
+ JMP #70
+
+22 JMP COMRTS ;Finish
+
+23 JMP ERROR
+
+25 LDAIM PSAVD
+ STA MIDTX ;Save data port
+
+ LDAIM :LSB:BUFSZ ;** 6/2/84 **
+ STA MIDTX+1 ;Size of save buffer
+ LDAIM :MSB:BUFSZ ;** 6/2/84 **
+ STA MIDTX+2 ;Size of save buffer hi
+
+ [ $CMOS
+ STZ RTCODE
+ |
+ LDAIM 0
+ STA RTCODE
+ ]
+ LDAIM 3 ;offset in buffer of name
+ STA CCODE
+
+ JSR SAVNAM ;get filename
+ TYA ;Y=length of filename
+ CLC
+ ADCIM TXHDR+7
+
+ JSR REPLY ;Send message with 0 RC and C.code
+ BNE #42 ;No contact => abort
+
+;If we get here, ready to receive
+;data, so set up for receive loop.
+
+ [ $CMOS
+ STZ DATAIN
+ STZ DATAIN+1
+ STZ DATAIN+2 ;DATAIN -> no. of bytes received
+ STZ DSCERR ;Error flag
+ |
+ LDAIM 0
+ STA DATAIN
+ STA DATAIN+1
+ STA DATAIN+2 ;DATAIN -> no. of bytes received
+ STA DSCERR ;Error flag
+ ]
+ LDX BPTR
+ LDAAX MIDRX+8 ;Check if zero length file
+ ORAAX MIDRX+9
+ ORAAX MIDRX+&A
+ BNE #35 ;Nope -> carry on
+ JMP #65 ;Yep -> send final reply
+
+35 LDAIM 0
+ LDYIM ARGG
+ STAIY NEWARG ;Current disc block start
+ INY
+ STAIY NEWARG ;Current disc block start (hi)
+
+;Set buffer pointers in control block
+
+40 LDY QPTR
+ [ $Level3
+ LDA IOBUF
+ STAAY CBBUF
+ LDA IOBUF+1 ;Buffer (hi)
+ STAAY CBBUF+1
+
+ LDA IOEND
+ STAAY CBBUFE ;Buffer end (lo)
+ LDA IOEND+1
+ STAAY CBBUFE+1 ;Buffer end (hi)
+
+ LDAIM &FF
+ |
+ LDA BBUF
+ STAAY CBBUF
+ LDA BBUF+1 ;Buffer (hi)
+ STAAY CBBUF+1
+
+ LDA BBEND
+ STAAY CBBUFE ;Buffer end (lo)
+ LDA BBEND+1
+ STAAY CBBUFE+1 ;Buffer end (hi)
+
+ LDAIM &00
+ ]
+ 
+ STAAY CBBUF+2
+ STAAY CBBUF+3
+ STAAY CBBUFE+2
+ STAAY CBBUFE+3 ;high order addresses
+
+ LDAIM PSAVD ;Set data port
+ STAAY CBPORT
+
+ JSR WAIT ;Station set
+ BEQ #45 ;Ok, continue
+42 JMP #90 ;No contact => abort
+
+;Now subtract buffer received limits to
+;get how much data was received.
+
+45 LDY QPTR ;** Y corrupted in WAIT **
+ SEC
+ LDAAY CBBUFE
+ SBCAY CBBUF
+ STA DIVPAR
+
+ LDAAY CBBUFE+1
+ SBCAY CBBUF+1
+ STA DIVPAR+1
+ [ $CMOS
+ STZ DIVPAR+2 ;Top byte always 0
+ |
+ LDAIM 0
+ STA DIVPAR+2 ;Top byte always 0
+ ]
+ 
+;Add no. received to total no. of
+;bytes received.
+ CLC
+ LDA DIVPAR
+ ADC DATAIN
+ STA DATAIN
+ LDA DIVPAR+1
+ ADC DATAIN+1
+ STA DATAIN+1
+ LDA DIVPAR+2 ;For superstitions sake
+ ADC DATAIN+2
+ STA DATAIN+2
+
+ LDA DSCERR
+
+;If error code set, ignore received
+;data and jump past disc write.
+
+ BNE #50
+
+ JSR DIVIDE ;Get no. of disc blocks to write (in BREGA)
+
+ LDYIM ARGI
+ LDA DIVPAR
+ STAIY NEWARG
+ INY
+ LDA DIVPAR+1
+ STAIY NEWARG ;No. of blocks to write
+ INY
+ [ $Level3
+ LDA IOBUF
+ STAIY NEWARG ;Address of data to write
+ INY
+ LDA IOBUF+1
+ |
+ LDA BBUF
+ STAIY NEWARG ;Address of data to write
+ INY
+ LDA BBUF+1
+ ]
+ STAIY NEWARG ;As above (hi)
+
+ LDYIM ARGB
+ JSR SINDSC ;Set SIN and disc number
+
+ LDAIM 4 ;write from IO side
+ JSR SETRTN
+ JSR DSCMAN
+ BEQ #50
+ STA DSCERR
+
+
+;Now compare amount received (in DATAIN)
+;with file size (in receive message buffer).
+
+50 LDY BPTR
+ SEC
+ LDAAY MIDRX+8
+ SBC DATAIN
+ STA BREGA
+ LDAAY MIDRX+9
+ SBC DATAIN+1
+ STA BREGA+1
+ LDAAY MIDRX+&A
+ SBC DATAIN+2
+
+ ORA BREGA
+ ORA BREGA+1
+ BEQ #65 ;If equal, SAVE finished...
+ BCS #55 ;If rx'd < size, carry on
+
+;Otherwise, client has sent too
+;much data, so send error code and
+;abort.
+
+ LDAIM SAVERA ;Error code
+ JMP #85
+
+;Add no. of blocks saved to block
+;start to get block start for next
+;reception of data.
+
+55 LDYIM ARGI
+ LDAIY NEWARG
+ DEY
+ DEY
+ CLC
+ ADCIY NEWARG
+ STAIY NEWARG
+ INY
+ LDAIY NEWARG
+ INY
+ INY
+ ADCIY NEWARG
+ DEY
+ DEY
+ STAIY NEWARG
+
+;Now send ack. on ack. port sent from client
+
+ LDY BPTR
+ LDXAY CPUFD ;Ack. port
+ LDAIM 1 ;Message length
+ JSR REPLYB
+ BNE #90 ;Not ok, abort
+ JMP #40 ;Go off round loop again.
+
+;At this point, have received the
+;correct amount of data, so check
+;error flag to see if all data was
+;written, and if not, send the
+;error off as a return code.
+
+65 LDA DSCERR
+ BNE #85
+
+;Now prepare to do PRESERVE to
+;keep the data on disc.
+
+70 LDAIM DRPRS
+ JSR #95
+ BNE #85
+
+ LDYIM ARGG ;** 4/8/83 **
+ LDAIY NEWARG ;access status
+ STA MIDTX
+ LDAIM TXHDR+3 ;Otherwise reply with access + date
+ JSR REPLYC
+
+ JSR OBJCLR ;Delete object if neccessary (see PRESERVE)
+ BNE #85 ;**** 17/3/83 ****
+
+80 JMP COMRTS ;Finished  ... exit
+
+85 JSR EXTERR ;Send error to client
+
+;Abort exit ... clear entry from
+;map of created space using FREESTORE,
+;and exit.
+
+90 LDYIM ARGB
+ JSR SINDSC ;Get disc/sin to stack
+ LDAIM 2
+ JSR SETRTN
+
+ LDYIM ARGF ;pass pointer to user info (ARGG,H)
+ JSR SETUSE ;** 3/10/84 **
+
+ JSR MAPMAN  ;** Free space **
+ BEQ #80
+ JSR INTERR
+
+;Routine to DIRMAN.DRPRS or DIRMAN.CHECKPRES
+;DIRMAN code in A on entry
+
+95 JSR SETRTN
+
+ LDYIM ARGO ;SIN GOES IN ARGQ->ARGS (!)
+ JSR SINDSC ;Get SIN/DISC to stack
+ LDAIM &80
+ STAIY NEWARG ;ARGT = wild card flag
+
+ JSR STKUSA
+
+ LDAIM SAVFTO
+ JSR SETFTP
+
+ [ Pseudods = Yes
+ LDYIM UTHUFD ;**1/7/87** fix up user root handle
+ LDAIY USTPTR
+ STA UMHUFD
+ ]
+
+;Move load/exec addresses from
+;receive message buffer to stack
+
+ LDX BPTR
+ LDYIM ARGF
+97 LDAAX MIDRX
+ STAIY NEWARG
+ INX
+ INY
+ CPYIM ARGF+8
+ BNE #97
+
+ LDAIM ACCDEF ;Access default
+ STA MIDTX ;Store for final reply
+ STAIY NEWARG
+
+ [ $Level3
+ [ 1=0
+ JSR SETDAT ;Read time chip if present
+ ]
+ |
+ JSR GETDTE ;Read date & time
+ ]
+ LDYIM ARGO
+ LDA DATE
+ STA MIDTX+1 ;Store for final reply
+ STAIY NEWARG
+ INY
+ LDA DATE+1
+ STA MIDTX+2 ;Store for final reply
+ STAIY NEWARG
+
+ JMP DIRMAN ;*** DO PRESERVE **
+
+ LNK UADE16A

@@ -1,0 +1,1 @@
+*|Assembly sequence for FileStore MOS > MOSAsm*|By Jes 3/9/84,  Updated by Glenn 8/5/85*|Updated by Mark Usher 7/4/21*DIR $.MOS*LIB $.LIBRARY*TurMasm*OPT 1 1STOP ONASM MOS01*CBCH."MOSMAKE"
