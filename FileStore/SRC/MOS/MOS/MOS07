@@ -1,0 +1,38 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS07
+ TTL File server file MOS07
+
+
+ ORG &FFE3
+
+OSASCI             ; *** Osasci *** &FFE3
+ CMPIM CR
+ BNE OSWRCH
+
+OSCRLF             ; *** Oscrlf *** &FFE7
+ LDAIM LF
+ JSR OSWRCH
+ LDAIM CR
+
+OSWRCH JMP WRCVEC  ; *** OSwrch *** &FFEE
+OSWORD JMP WORVEC  ; *** OSword *** &FFF1
+OSBYTE JMP BYTVEC  ; *** OSbyte *** &FFF4
+
+BYFFF7 = &00 
+SRSTV  = &00, &00
+NMIV   = :LSB:INT,    :MSB:INT    ; &FFFA
+RSTV   = :LSB:HRESET, :MSB:HRESET ; &FFFC
+IRQV   = :LSB:IRQ,    :MSB:IRQ    ; &FFFE
+
+
+ 
+FNSH
+LEFT * HIMEM-.    ; get free store
+ [ LEFT > 0        ; must not overflow workspace
+ |
+ ! 0,"HIMEM incorrect"
+ ]
+
+;** T H E  E N D ***
+ END
+
+

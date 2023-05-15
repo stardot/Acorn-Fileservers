@@ -1,0 +1,92 @@
+FileStore FS ROM v1.23
+======================
+
+This disc contains the source code for the Acorn FileStore E01 file server ROM.
+
+Assembling the File Store Source Code
+======================================
+
+The source code will assemble on either a BBC with an Acorn Turbo (256K) 
+6502 Co-Processor and ADFS or on Arthur/RISC OS using the 6502 Turbo 
+Co-Processor emulator which is included here.
+To assemble on a BBC, use SHIFT-BREAK or *EXEC !BOOT. On RISC OS, double 
+clicking the file GO will start the process. The assembled file "FSROM" will be
+placed in the root directory. The assembly process is significantly faster 
+when a hard drive is used instead of a floppy.
+
+Files
+=====
+
+\ $
+  !BOOT     - BBC Routine to set library, load co-pro BASIC and call FSASM
+  FSASM     - Loads TurboMasm and starts the FileStore binary assembly
+  GO        - RISC OS Routine to set library, load emulator and call FSASM
+  README    - This file
+
+\ LIBRARY
+  65ARTHURT - The Turbo Co-processor emulator for RISC OS
+  CB        - BASIC for the Turbo Co-processor
+  TURMASM   - Turbo version of MASM assembler
+  
+\ FILESTORE  
+  The source code files  
+  FSmake    - BASIC program to put together the assembed parts and create
+              the Filestore ROM binary "FSROM"
+
+\ FILESTORE\X
+  Location for the assembled parts. Do not delete or the assembler will fail.
+
+
+Version 1.23
+============
+
+Date - estimated August 1987. The last changes in the source code are dated 
+8 Aug 1987. The FileStore E01 is advertised in Acorn User magazine in July 
+1987 which may have been pre-orders. The FileStore with serial number 0001
+had v1.23 fitted. The AcornUser show in 1987 was 23-26 July and may be where
+Acorn revealed the first machines.
+
+26/6/87 is when the pseudo directory symbols were added.
+24/7/87 
+8/8/87 appears to be the date of the last changes.
+
+Comments
+========
+The file server ROM code has been created using the original v1.31 FileStore
+file server source code and the original Level3 file server v1.06 source code.
+
+There is support for the Pseudo directory symbols (%, &, @) which was turned
+off in later releases. The file server software also has a big buffer cache
+option introduced for replies using the Cachesw switch which is set to no in
+the original release.
+
+The original file server FSmake that puts together the assembled parts has been
+altered to insert 512 bytes at the start of the ROM so the image is ready
+for use directly. This maps to 512 bytes of zero page workspace as the ROM
+code executes from address 0x200.
+
+This is the initial release of the FileStore E01 file server ROM.
+
+==========================================================================
+ DRAWING /   |         TITLE                         | ISS | SHT |  LAST
+ NUMBER  /   |                                       |     |     | AMR/ECO
+=============|=======================================|=====|=====|========
+v1.23---------------------------------------------------------------------
+0254,204      E01 MOS ROM                               3     N/A ECO E369
+0254,204/SI   MOS HARNESS ROM SIS                       4     1   ECO 2161
+0254,204/DR   FS MOS HARNESSS CODE ROM OBJECT/SOURCE    1     N/A
+
+0254,205      E01 FS ROM                                4     N/A ECO E392
+0254,205/SI   FILESERVER CODE ROM SIS                   5     1   ECO 2161
+0254,205/DR   FS F'SERVER CODE ROM OBJECT/SOURCE DISC   1     N/A
+
+v1.??---------------------------------------------------------------------
+0254,202      E01 PRE FUNCTIONAL ROM                    1     N/A
+0254,202/DR   E01 PRELIMINARY FUNC TEST ROM SOURCE DISC 1     1   AMR B143
+0254,203      E01 FUNCTIONAL ROM                        2     1   AMR B143
+0254,203/DR   E01 FUNCTIONAL TEST ROM SOURCE DISC       1     N/A
+
+
+Changes
+=======
+No previous version to compare to.

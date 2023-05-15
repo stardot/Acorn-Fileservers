@@ -1,0 +1,224 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS05
+ TTL File server file MOS05
+
+;*********************************
+;*            OSBYTE             *
+;*********************************
+
+
+; OSBYTE FUNCTIONS
+;        Checks are chained
+;    A = &32/50 Poll Txcb
+;        &33/51 Poll Rxcb
+;        &34/52 Delete Rxcb
+;        &80 X=0   Door switch open or closed
+;            X=&FC Read free bytes in printer output buffer 
+;        &84 Read top of workspace address
+;        &89 MODE LED ON/OFF
+
+
+
+; *******************************************************************
+;                        
+;                  OSByte Routines
+;
+; *******************************************************************
+
+; *******************************************************************
+; OSBYTE &32       Polling Transmission
+;
+; entry: A &32
+;      X,Y undefined
+;
+; exit : A Undefined
+;        X status of transmission: 
+;          0 if transmission successfully completed, otherwise
+;          bit  state  meaning
+;           7     0    completed
+;                 1    in progress
+;           6     0    successful
+;                 1    failed
+;           5     0
+;          0-4         error code if failed, otherwise 0
+;
+;        Y Undefined
+;
+; error codes
+;        &40 line jammed
+;        &41 some part of four-way handshake lost or damaged
+;        &42 no scount acknowledgment in four-way handshake
+;        &43 no clock
+;        &44 bad TRANSMIT control block
+
+BYTVEC ROUT
+ CMPIM &32
+ BNE OSBY33
+ JSR NETPOLL
+ LDYIM 0
+ LDAIY TXCBPT
+ TAX
+ RTS
+
+; *******************************************************************
+; OSBYTE &33       Polling Reception
+;
+; entry: A &33
+;        X Receive control block number
+;        Y undefined
+;
+; exit : A Undefined
+;        X flag: if the top bit is set, a message has been received
+;        Y Undefined
+;
+ 
+OSBY33
+ CMPIM &33
+ BNE DELCB
+ JSR NETPOLL
+
+
+FNDRXB ROUT
+ LDAIM :LSB:RXCB   ; get pointer to Rx buffer
+ LDYIM :MSB:RXCB
+ STA WORKP1        ; store ptr in temp workspace
+ STY WORKP1+1
+10                 ; retry loop
+ LDAI WORKP1       ; get first byte in Rx buffer
+ BEQ #20           ; =0, end of buffer
+ 
+ DEX               ; 
+ BNE #30           ; try the next one
+
+20 
+ TAX
+ RTS
+
+30 CLC
+ LDAIM RXBLEN      ; Length of RX Block
+ ADC WORKP1
+ STA WORKP1
+ BCC #10
+ INC WORKP1+1
+ BRA #10      ; retry
+ 
+
+; *******************************************************************
+; OSBYTE &34       Delete Receive control block
+;
+; entry: A &34
+;        X Receive control block number
+;        Y undefined
+;
+; exit : A Undefined
+;        X control block number
+;        Y Undefined
+
+
+DELCB ROUT
+ CMPIM &34
+ BNE OSBY80
+
+ JSR FNDRXB   ; find RX control block 
+ BEQ #10
+ 
+ LDAIM RXCLR  ; delete flag byte
+ STAI WORKP1
+10 RTS
+
+; *********************************************************
+; OSBYTE &80
+
+; Filestore: Readstate
+
+; X=0: Read COMMAND/USER and Floppy drive door switch states,
+; returns in A: 2 if drive door open, 1 if in COMMAND mode; 3 both
+
+; switch status, present on bit 6
+; E01 has a SW3 on bit 7, not present on E01S
+
+
+; X=252: Read free bytes in printer output buffer.
+; returns in X the number of spaces remaining
+
+OSBY80
+ CMPIM &80         ; this OSBYTE CALL &80?
+ BNE #60           ; no, check the next one
+ TXA               ; command into A
+ BNE #40
+ LDAIM 0
+
+; Command 0
+; read door switch state
+ 
+ BIT FPSWTCH       ; Front panel switch, b7->N, b6->V 
+ BMI #20           ; b7 set? yes, no command mode on E01 Filestore model
+ INCA              ; otherwise set command mode
+20
+ BVC #30           ; b6 set? yes, door closed
+ ORAIM 2           ; add 2 
+30 RTS
+
+; Command 252
+
+40
+ CPXIM &FC
+ BNE #10           ; no, then exit
+
+; read free bytes in the printer buffer
+
+ LDA VSTATE        ; get ; last VIA state
+ BEQ #55
+
+ LDA PBNEXT        ; next byte free
+ SEC               ; set carry
+ SBC PBPTR         ; subtract the pointer from the current pos
+ BNE #50           ; something is in buffer, then branch
+
+ LDA VIA +IER      ; check for interrupt from the printer
+ RORA            
+ RORA              ; CA1 -> CARRY
+ LDAIM 0           ; set to 0
+ BCS #55           ; exit if interrupt, otherwise return buffer size
+ 
+50 CLC            
+ ADCIM PSIZE       ; add the size of the buffer
+55 TAX             ; return number of free bytes in X
+ RTS
+
+; *******************************************************************
+; OSBYTE &84
+;
+; A=132    Read address of top of workspace area to X/Y. The value
+;          returned is the current base of the MOS
+
+60 CMPIM &84       ; OSBYTE &84?  
+ BNE #70           ; no, check next OSBYTE function &89
+ 
+ LDXIM :LSB:HIMEM
+ LDYIM :MSB:HIMEM
+ RTS
+
+
+; *******************************************************************
+; OSBYTE 137
+;
+; Filestore: Perform LED status On/off
+; X=0 will turn off the programmable led, 
+; X=1 will turn it on
+
+70 CMPIM &89
+ BNE #90
+ TXA
+ RORA
+ LDA MSTATE        ; get current state from memory
+ ANDIM LEDOFF      ; -LED FDCTST FDCRST FDCDEN NVRAM FDSSEL DRV2 DRV1
+ BCC #80           ; if MODE LED was on, turn off otherwise
+ ORAIM LEDON       ; +LED FDCTST FDCRST FDCDEN NVRAM FDSSEL DRV2 DRV1
+80
+ STA ROMSWW        ; set MODE LED to ON or OFF
+ STA MSTATE        ; update status in memory
+90
+ RTS
+
+
+ LNK NET01

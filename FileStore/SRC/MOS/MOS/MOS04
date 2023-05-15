@@ -1,0 +1,684 @@
+ OPT 1 ; > <FileStoreMOSSource>.MOS04
+ TTL File server file MOS04
+
+;*********************************
+;*        OSWRCH & OSWORD        *
+;*********************************
+
+; OSWRCH Write character to currently selected output stream
+
+; OSWORD FUNCTIONS - checks for function are chained
+;    A = &10 Econet Transmit (Max 1 Tx block)
+;        &14 Send string to remote station
+;        &11 Econet Receive (Max 18 Rx blocks)
+;        &13 Read Write Station Information
+;            1 write file server number
+;            5 write protection mask
+;        &72 Read/Write blocks 
+;            8 Read block(s)
+;            A Write block(s)
+;            D set drive parameters
+;            F Format drive
+;         2  Write date/time to RTC chip
+;         1  Read date/time from RTC chip
+;         3  Read timer interval 
+;         4  Write timer interval
+;         5 Read CMOS memory
+;         6 Write CMOS memory
+
+
+; *******************************************************************
+;                        
+;                  OSWRCH
+;
+; Write the character given in the accumulator to the printer
+;
+; On Entry 
+;           A= ASCII value of character to ouput
+;
+; On Exit : A Undefined
+;           X Preserved
+;           Y Preserved
+
+
+WRCVEC ROUT
+ PHX               ; preserve X
+ LDX PBPTR         ; pointer to next slot in printer buffer
+10
+ CPX PBNEXT        ; current pos
+ BNE #20
+ PHA               ; save character to print
+ LDA VIA +IER      ; Interrupt Enable Register
+ RORA              ; bit 0 CA2 -> CARRY
+ RORA              ; bit 1 CA1 -> CARRY
+ PLA               ; retrieve print char
+ BCS #10           ; wait until CA1 is clear
+20
+ STAAX PBUFF       ; insert character into buffer
+ JSR SETBUF        ; construct buffer pointer
+ STX PBPTR
+ LDA VIA +IER      ; Interrupt Enable Register
+ RORA
+ RORA              ; CA1 -> CARRY
+ BCS #40           ; if set, exit. Can't print now
+ 
+ CPX PBNEXT
+ BEQ #40
+ 
+ LDAIM &FF         ; +PA7 +PA6 +PA5 +PA4 +PA3 +PA2 +PA1 +PA0 
+ STA VIA +DDRA     ; select VIA pins PA7-PA0 as outputs
+
+ LDA VIA +PCR 
+ ANDIM &F0
+ ORAIM &A
+ STA VIA +PCR
+ LDAIM 2           ; -SET/CLR -TIMER1 -TIMER2 -CB1 -CB2 -SHIFT +CA1 -CA2
+ STA VIA +IFR      ; clear CA1 in the interrupt flag register
+ LDAIM &82         ; +SET/CLR -TIMER1 -TIMER2 -CB1 -CB2 -SHIFT +CA1 -CA2
+ STA VIA +IER      ; enable CA1
+ 
+ LDX PBNEXT
+
+30
+ LDAAX PBUFF
+ STA VIA +OUTA
+40
+ PLX               ; reinstate X
+ RTS
+
+SETBUF
+ INX
+ CPXIM &90
+ BCC #60
+ LDXIM 0
+60
+ RTS
+ 
+PRNCHR
+ PHX
+ LDAIM 2           ; pulse output on CA1 to the printer
+ BIT VIA +IER
+ BEQ #40
+ BIT VIA +IFR
+ BEQ #40
+ STA VSTATE
+ LDX PBNEXT
+ JSR SETBUF
+ STX PBNEXT
+ CPX PBPTR
+ BNE #30
+ STA VIA +IER
+ STA VIA +&D
+ BRA #40
+ 
+
+; *******************************************************************
+;                        
+;                  OSWORD Routines
+;
+; *******************************************************************
+ 
+
+; *******************************************************************
+; OSWORD &10       Econet Transmit (Max 1 Tx block)
+;
+; entry: A &10
+;      X,Y pointer to Transmit Control Block
+;
+; exit : A Undefined
+;        X Undefined
+;        Y Undefined
+;
+; control block
+;
+;        0 control; on entry set top bit 
+;                   byte will be zero if transmission fails to start
+;        1 destination port
+;        2 destination station
+;        3 destination nework
+;        4 address of data buffer start
+;        8 address of data buffer end
+;       12 remote address for immediate operations
+;
+; Transmission must be polled with OSBYTE &32 (50). If the
+; destination station is &FFFF, a broadcast will be sent, the eight
+; bytes of data are in the control block at XY+4 to XY+11. If the
+; port number is zero, an immediate operation is transmitted.
+
+
+WORVEC ROUT
+ STX PARAMP        ; store pointer to control block
+ STY PARAMP+1
+ CMPIM &10         ; OSWORD &10?
+ BNE OPENRX        ; no, go to OSWORD &11 OPEN RX
+
+TXPOLL ROUT
+ BIT TXCLR1        ; TX clear?
+ BMI #10
+ LDAIM 0           ; TX failed to start
+ STAI PARAMP
+ RTS
+
+;claim work area
+
+10 
+ LDXIM :LSB:TXCB   ; get pointer
+ LDYIM :MSB:TXCB
+ STX TXCBPT        ; copy direct into the pointer
+ STY TXCBPT+1
+ 
+ LDYIM &B          ; length of OSWORD CB
+20
+ LDAIY PARAMP      ; copy parameters from the OSWORD CB
+ STAIY TXCBPT      ; to the transmit CB
+ DEY
+ BPL #20
+ 
+ LDAIM &80         ; ensure bit 7 in the control byte is set
+ TSB TXCB
+ JMP TRANSM        ; transmit
+
+
+; *******************************************************************
+; OSWORD &14       Econet Various network functions
+;
+; entry: A &14
+;      X,Y pointer to Control Block
+;
+; exit : A last character sent
+;        X Number of retries of last character
+;        Y length of string sent
+;
+; control block 
+;        0 command
+;        1 remote station
+;        1 remote network
+;        3 string to send, terminated by CR or &00. 
+
+; OSWORD &14 - various network functions
+
+; routine to send a string to a remote m/c
+; and put it into the command buffer, to allow poking
+; of BASIC programs etc.
+
+SENDST ROUT
+ LDAI PARAMP       ; get control block pointer
+ CMPIM 1           ; only command 1, send string is implemented
+ BNE #60
+ 
+ LDAIM :LSB:TXCB   ; get pointer to Tx Control block
+ LDYIM :MSB:TXCB
+ STA TXCBPT        ; copy direct into the pointer
+ STY TXCBPT+1      
+ 
+ CLC
+ ADCIM &E          ; buffer for char in TXCB
+ STA TXCB+4        ; data buffer start lo = Rx block PTR
+ STY TXCB+5        ; data buffer start hi = Rx block PTR
+ INCA              ; char sent one at a time, buffer end =+1
+
+ STA TXCB+8        ; data buffer end +1
+ STY TXCB+9        ; data buffer end +1
+ STZ TXCB+&C       ; remote address = 0
+ STZ TXCB+&D	   ; clear temp workspace
+
+ STZ WORKP1+1
+ STZ TXCB+1        ; destination port 0
+
+ LDYIM 1          
+ LDAIY PARAMP 
+ STA TXCB+2        ; destination station
+ INY               ; 2nd byte of control block
+ LDAIY PARAMP       
+ STA TXCB+3        ; destination network
+
+; get string to send, char by char
+
+10 INY             
+ LDAIY PARAMP      ; get char to send
+ BEQ #60           ; 00? exit
+ CMPIM CR          ; 0D? exit
+ BEQ #60           
+
+20 BIT TXCLR1      ; TX clear?
+ BPL #20
+ STA WORKP1        ; char in buffer
+ LDXIM 0
+
+30 LDAIM IPROCH    ; REMOTE HIGH LEVEL PROCEDURE CALL
+ STA TXCB         
+ PHX
+ PHY               ; save index of string
+ JSR TRANSM        ; transmit
+ PLY               ; retrieve string index
+ PLX
+ 
+40 LDA TXCB        ; check Tx status
+ BMI #40           ; wait?
+ BEQ #10           ; send next byte
+ 
+50 PHA             ; slight delay loop
+ PLA               ; before a retry
+ INCA          
+ BNE #50
+ INX               ; no of retries
+ BNE #30
+ 
+60 RTS
+ 
+
+; *******************************************************************
+; OSWORD &11       Econet Receive Open/Read Rx Control block
+;
+;
+; entry: A &11
+;      X,Y pointer to Receive Control Block
+;
+; exit : A = 00 if unable to allocate because space limit reached
+;        X Undefined
+;        Y Undefined
+;
+; control block
+; OPEN
+;        0 00; is set to control block number on exit.
+;          Will be set to 0 if unable to open block because space
+;          limit reached
+;        1 flag: must be set to &7F on entry; when transmission is
+;          received, control byte from remote station's Transmit
+;          control block is copied here
+;        2 port
+;        3 station
+;        4 network
+;        5 address of data buffer start
+;        9 address of data buffer end
+;
+; READ receive block
+;        0 Receive control block number to read
+;       x 1 flag:    from Tx station
+;       x 2 port:    from Tx station
+;       x 3 station: from Tx station
+;       x 4 network: from Tx station
+;        5 address of data buffer start
+;        9 address of data buffer end
+
+
+OPENRX ROUT
+
+ CMPIM &14         ; OSWORD &14?
+ BEQ SENDST
+ CMPIM &11         ; OSWORD &11 Open RX?
+ BNE RWSTN         ; no, go to OSWORD &13 Read/Write Station
+
+;call to OPEN or READ an Rxcb
+;If the call is for READ then the first
+;byte of the CB contains the number of the
+;block to be read. Otherwise the byte is zero.
+
+;If the CB is already deleted then ZERO
+;is returned in this byte.
+
+;If the call is to OPEN then the CB number
+;is returned here; if no CB's are free then
+;ZERO is returned.
+
+ LDAI PARAMP       ; get Rx Block number from control block
+ TAX               ; put in X
+ BNE #60           ; not 0, read and delete
+
+; find a free Rx block
+ LDAIM :LSB:RXCB   ; get pointer to Rx buffer
+ LDYIM :MSB:RXCB
+ STA WORKP1        ; store ptr in temp workspace
+ STY WORKP1 + 1
+
+10 INX             ; increment RxCB index count
+ LDAI WORKP1       ; get first byte in RxCB
+ BEQ #40           ; =0, then end of buffer. exit
+
+ CMPIM RXCLR       ; is the block already used?
+ BNE #50           ; Yes. get next one
+
+; allocate the block
+ TXA               ; rx block index->A
+ STAI PARAMP       ; put index in OSWORD control block
+ INC PARAMP        ; 
+ BNE #20           
+ INC PARAMP+1
+
+20 LDYIM RXBLEN-1  ; length of control block-1
+
+30 LDAIY PARAMP    ; copy the contents from the OSWORD CB
+ STAIY WORKP1      ; to the RxBlock
+ DEY
+ BPL #30
+
+40 RTS
+
+50 CLC
+ LDAIM RXBLEN      ; Length of RX Block
+ ADC WORKP1
+ STA WORKP1
+ BCC #10
+ INC WORKP1+1
+ BRA #10
+
+; RX block number was given so read and 
+; delete RxBlock
+60 JSR FNDRXB     ; allocate control block
+ BEQ RXEXIT        ; returned 0?
+
+; copy the Rx block to the parameter block
+ LDYIM 0
+70 LDAIY WORKP1
+ INY
+ STAIY PARAMP
+ CPYIM RXBLEN      ; Finised copying Rx block?
+ BCC #70
+ 
+; delete Rx block
+ LDAIM RXCLR       ; flag the block as deleted
+ STAI WORKP1
+
+RXEXIT
+ RTS
+
+
+; *******************************************************************
+; OSWORD 0x13      Read/Write station infomation
+; On entry:
+;                  XY+0=function
+;                  XY+1..=read or written data
+; On exit:
+;                  XY+1=this net or &00.
+;                  If XY+3=0, returns XY?3=file server net number.
+;                  If XY+3=this net, returns XY+3=0.
+;                  If XY+3<>this net, returns XY+3 unchanged.
+; only function 5 set mask and function 1 set station id are implemented
+
+RWSTN ROUT
+ CMPIM &13         ; Is the call for OSWORD 13?
+ BNE OSWD72        ; go to OSWORD &72 
+ LDYIM 0           ; start of control block
+ LDAIY PARAMP
+ INY
+ CMPIM 5           ; write protection mask?
+ BNE #10           ; no, check for write FS number
+ LDAIY PARAMP
+ STA IMASK
+ RTS
+
+10
+ CMPIM 1           ; write FS number
+ BNE RXEXIT        ; no other commands implemented
+ LDAIY PARAMP
+ STA RTCFS         ; station ID for CMOS
+ LDXIM Stnids      ; offset in CMOS
+ JSR CMOSWR        ; write to CMOS
+ EORIM &FF         ; station ID checkbyte
+ INX
+ JSR CMOSWR        ; write to CMOS
+ RTS
+
+; CMOS Function
+; Read a byte from CMOS with offset given in
+; XY+0
+
+OSWD5 ROUT
+ CMPIM 5
+ BNE OSWD6
+ LDAI PARAMP
+ TAX               ; put offset in X
+ SEI
+ JSR CMOSRD        ; read CMOS
+
+ CLI
+ LDYIM 4           ; return value in XY+4
+ STAIY PARAMP      ; store value read
+ RTS
+
+; CMOS Function
+; sends the byte at control block +4 to RTC
+; to offset XY+0
+
+OSWD6 ROUT
+ CMPIM 6
+ BNE RXEXIT
+ LDAI PARAMP
+ TAX
+ LDYIM 4      
+ LDAIY PARAMP      ; get the byte to transfer
+ SEI
+ JSR CMOSWR        ; write to CMOS
+ CLI
+ RTS
+ 
+OSWD72 ROUT
+ CMPIM &72
+ BNE OSWD2
+ JMP OSWDRW
+
+; Read timer interval
+
+OSWD3 ROUT
+ CMPIM 3
+ BNE OSWD4
+ LDYIM 0
+10 LDAAY TIMER
+ STAIY PARAMP
+ INY
+ CPYIM 5
+ BCC #10
+ RTS
+
+; write timer interval
+
+OSWD4 ROUT
+ CMPIM 4
+ BNE OSWD5
+ LDYIM 0
+10 LDAIY PARAMP
+ STAAY TIMER
+ INY
+ CPYIM 5
+ BCC #10
+ RTS
+
+; The date and time are in the file server format, which is:
+; byte 0: date in month
+; byte 1: years since 1981 / month (4 bits each)
+; byte 2: hours (24 hour clock)
+; byte 3: minutes
+; byte 4: seconds
+
+OSWD2 ROUT
+ CMPIM 1           ; OSWORD 1?
+ BEQ OSWD1
+ CMPIM 2           ; Is this OSWORD 2
+ BNE OSWD3
+ 
+ SEI
+ LDXIM &B          ; RTC Register B
+ JSR CMOSRD
+ ORAIM &80         ; SET CMOS to enable update of time
+ JSR CMOSWR
+ 
+ LDYIM 0
+ LDAIY PARAMP
+ LDXIM 7           ; Day of month
+ JSR CMOSWR
+ 
+ INY
+ LDAIY PARAMP
+ LSRA
+ LSRA
+ LSRA
+ LSRA
+ CLC
+ ADCIM BASEYR
+ 
+10 LDXIM 9         ; Year
+ JSR CMOSWR
+ LDAIY PARAMP
+ ANDIM &F
+ DEX
+ JSR CMOSWR
+ 
+ INY
+ LDAIY PARAMP
+ LDXIM 4           ; Hours
+ JSR CMOSWR
+
+ INY
+ LDAIY PARAMP
+ LDXIM 2           ; Minutes
+ JSR CMOSWR
+ 
+ INY
+ LDAIY PARAMP
+ LDXIM 0           ; Seconds
+ JSR CMOSWR
+
+ LDXIM &B          ; RTC Register B
+ JSR CMOSRD
+ ANDIM &7F         ; disable CMOS time update
+ ORAIM &10         ; enable update ended flag
+ JSR CMOSWR
+ 
+ CLI
+ RTS
+
+; return date/time which is stored in memory
+ 
+OSWD1
+ LDA DATE+4
+ PHA
+ LDYIM 0
+10
+ LDAAY DATE        ; read the time
+ STAIY PARAMP      ; write to the OSWORD Control Block
+ INY
+ CPYIM 5
+ BCC #10
+ PLA
+ CMP DATE+4        ; are the seconds still the same?
+ BNE OSWD1         ; if not, redo
+ RTS
+
+
+; Get the time from the RTC
+
+RDTIME ROUT
+ PHX
+ LDXIM &C          ; RTC Register C
+ JSR CMOSRD
+ [ DEBUG = TRUE
+ STA CPYRTC
+ ]
+ BPL #20
+
+ LDAIM :LSB:REC    ; Check the NMI handler routine
+ CMP NMINET
+ BNE #20
+ LDAIM :MSB:REC
+ CMP NMINET+1
+ BNE #20
+ PHY
+ LDYIM 0
+
+ LDXIM 7           ; Day 
+ JSR CMOSRD
+ STAAY DATE        ; YYY DDDD
+ INY
+ 
+ LDXIM 9           ; Year
+ JSR CMOSRD
+ SEC
+ SBCIM BASEYR
+
+ ASLA
+ ASLA
+ ASLA
+ ASLA
+ STAAY DATE
+ DEX 
+ JSR CMOSRD
+ ORAAY DATE
+ STAAY DATE
+ INY
+ LDXIM 4           ; Hours
+ JSR CMOSRD
+ STAAY DATE
+ INY
+ LDXIM 2           ; Minutes
+ JSR CMOSRD
+ STAAY DATE
+ INY
+ LDXIM 0           ; Seconds
+ JSR CMOSRD
+ STAAY DATE
+ PLY 
+ CLC
+ LDA TIMER
+ ADCIM 100         ; running count in 1/100th second
+ STA TIMER
+ BCC #20
+ INC TIMER+1
+ BNE #20
+ INC TIMER+2
+ BNE #20
+ INC TIMER+3
+ BNE #20
+ INC TIMER+4
+20
+ PLX
+ RTS
+
+
+; On entry :
+; A = data to write
+; X = address to write
+
+CMOSRD ROUT
+ JSR CMseta        ; set CMOS access
+ STX RTCadd        ; address to write to
+ LDA RTCdat        ; data
+ BRA CMclra        ; clear CMOS access
+
+; On entry:
+; X = Location to read
+; On exit
+; A = Value read
+
+CMOSWR
+ JSR CMseta        ; set CMOS access
+ STX RTCadd        ; address to read from
+ STA RTCdat        ; data
+
+; drop through to clear CMOS access
+CMclra 
+ PHA               ; preserve A
+ LDA MSTATE        ; get current state from memory
+ ANDIM &F7         ; LED FDCTST FDCRST FDCDEN -NVRAM FDSSEL DRV2 DRV1 
+ STA ROMSWW        ; disable NVRAM access in hardware
+ STA MSTATE        ; update status in memory
+ JSR INTCNU
+ PLA               ; restore A
+ RTS
+
+; CMOS Set Access
+
+CMseta ROUT
+ PHA
+ JSR INTCND
+
+ LDA MSTATE        ; get current state from memory
+ ORAIM 8           ; LED FDCTST FDCRST FDCDEN +NVRAM FDSSEL DRV2 DRV1
+
+ STA ROMSWW        ; enable NVRAM access in hardware
+ STA MSTATE        ; update status in memory
+
+ PLA
+ RTS
+
+
+ LNK MOS05

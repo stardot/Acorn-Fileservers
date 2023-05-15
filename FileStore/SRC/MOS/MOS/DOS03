@@ -1,0 +1,633 @@
+ OPT 1 ; > <FileStoreMOSSource>.DOS03
+ TTL File server file DOS03
+
+ ORG &FD00
+
+
+; Table for floppy drive select in the ROMSWW register (&FC08)
+TFDRIV
+ = 1 ; Drive 0
+ = 2 ; Drive 1
+
+; Table for floppy side compare in the READ SECTOR command (&82)
+TFSCMP
+ = 0
+ = 8
+
+; Table for floppy side select in the ROMSWW register (&FC08)
+TFSSEL
+ = 0 ; Side 0
+ = 4 ; Side 1
+
+
+; -------------------------------------------------------------------------------
+;
+; OSWORD &72 Command F (Format)
+;
+; On Entry:
+;   X = drive number (0 or 1)
+;
+;   FSECTR,X = number of sectors per track (16 or 17) [ set by preceeding Set Drive Params command ]
+ 
+FDFRMT ROUT
+ JSR FDSWTR        ; Select Floppy Drive and Write Track register
+ LDAIM :LSB:FHEAD ; initialize the LSB of the compressed format data pointer
+ STA DISCCB+2
+ LDAIM :MSB:FHEAD ; initialize the MSB of the compressed format data pointer
+ STA DISCCB+3
+ LDYIM 1           ; Y = 1
+ LDAIY DISCCB      ; Addr0 in control block
+ STA DISCCB+4      ; store to ZP
+ INY               ; Y = 2
+ LDAIY DISCCB      ; Addr1 in control block
+ STA DISCCB+5      ; store to ZP, this buffer is used for the uncompressed format data
+
+ LDAAX FSECTR      ; geometry: physical sectors per track for drive X
+ STA FTRCK         ; patch the compressed format data with this value
+ LDAIM 3           ; set other value to 03 if 17 sector per track
+ STA FSECT         ; patch the compressed format data with 03 (ends up in sector data)
+ LDAAX FSECTR      ; geometry: physical sectors per track for drive X
+ CMPIM &11         ; is it 17 sectors per track?
+ BEQ #10           ; yes, then continue for format
+ STZ FSECT         ; patch the compressed format data with 00 (ends up in sector data)
+ CMPIM &10         ; is it 16 sectors per track?
+ BEQ #10           ; yes, then continue with format
+ LDAIM DRERRE      ; BAD COMMAND
+ JMP OW72XX        ; return from OSWORD
+
+; Expand the compressed format data, which has the following
+; two-level run-length encoded structure
+;
+; <COUNT1>
+;   <COUNT2>
+;   <VALUE>
+;   ...
+;   <COUNT2>
+;   <VALUE>
+;   <00>
+; ...
+; <COUNT1>
+;   <COUNT2>
+;   <VALUE>
+;   ...
+;   <COUNT2>
+;   <VALUE>
+;   <00>
+; <00>
+
+05
+ DEC DISCCB+8      ; decrement COUNT1
+ BNE #15           ; branch if not zero
+10                 ; <<<< Main Entry Point >>>>>
+ JSR GETNXT        ; read next byte of compressed format data
+ STA DISCCB+8      ; save the byte, which will be used as COUNT1
+ TAX               ; test if zero
+ BEQ #30           ; yes, we are done uncompressing the compressed format data
+ LDA DISCCB+2      ; copy the format buffer pointer to the temp pointer
+ STA DISCCB+6
+ LDA DISCCB+3
+ STA DISCCB+7
+15
+ LDA DISCCB+6      ; copy the temp pointer back to the format buffer pointer
+ STA DISCCB+2
+ LDA DISCCB+7
+ STA DISCCB+3
+20
+ JSR GETNXT        ; COUNT2 = next byte of compressed format data
+ TAY               ; test if zero
+ BEQ #05           ; if so, loop back
+ JSR GETNXT        ; VALUE = next byte of compressed format data
+22
+ STAI DISCCB+4     ; store VALUE in the memory buffer
+ INC DISCCB+4      ; increment LSB of buffer pointer
+ BNE #25
+ INC DISCCB+5      ; increment MSB of buffer pointer
+25
+ DEY               ; decment COUNT2
+ BNE #22           ; loop back, storing VALUE again until COUNT2 reaches zero
+ BRA #20           ; loop back, reading the next COUNT2
+
+; prepare to patch the format buffer with the actual track/side/sector numbers
+30
+ JSR GETNXT        ; offset to track number byte in format buffer (A = &30)
+ STA TRACK 
+ JSR GETNXT        ; offset to side number byte in format buffer (A = &31)
+ STA SIDE  
+ JSR GETNXT        ; offset to sector number byte in format buffer (A = &32)
+ STA SECCNT
+ JSR GETNXT        ; low byte of raw sector length including all marks and gaps (A = &68)
+ STA BUFLEN
+ JSR GETNXT        ; high byte of raw sector length including all marks and gaps (A = &01)
+ STA BUFLEN+1    
+ LDX DRIVE
+ STZAX DxTRCK      ; zero track number
+ STZ DxSIDE        ; zero side
+
+; format track loop, repeated for each track on each side
+; patch the format buffer with the actual track/side/sector numbers for this track/side
+
+35
+ LDA TRACK         ; A = offset to track number byte in format buffer
+ JSR SETFBP        ; Set the format buffer pointer to format buffer + A
+ LDYAX FSECTR      ; Y = geometry: physical sectors per track for drive X
+40
+ LDAAX DxTRCK      ; A = actual track number
+ STAI DISCCB+4     ; store in format buffer (this replaces the first fixed 0xAA byte)
+ JSR ADDLEN        ; increment format buffer pointer by raw sector length
+ DEY               ; decrement the sector count
+ BNE #40           ; loop back until zero
+
+ LDA SIDE          ; A = offset to side number byte in format buffer
+ JSR SETFBP        ; Set the format buffer pointer to format buffer + A
+ LDYAX FSECTR      ; Y = geometry: physical sectors per track for drive X
+45
+ LDA DxSIDE        ; A = actual side number
+ STAI DISCCB+4     ; store in format buffer (this replaces the second fixed 0xAA byte)
+ JSR ADDLEN        ; increment format buffer pointer by raw sector length
+ DEY               ; decrement the sector count
+ BNE #45           ; loop back until zero
+
+ LDA SECCNT        ; A = offset to sector number byte in format buffer
+ JSR SETFBP        ; Set the format buffer pointer to format buffer + A
+ LDYAX FSECTR      ; Y = geometry: physical sectors per track for drive X
+ LDXIM 0           ; X = sector number, starting at zero
+ TYA
+ INCA
+ LSRA              ; DISCCB + 0 = (sectors per track + 1) / 2 = sector skew of half a track
+ STA DISCCB+9      ; = 8 (16 sectors per track) or 9 (17 sectors per track)
+50
+ TXA               ; X = sector number
+ STAI DISCCB+4     ; store in format buffer (this replaces the third fixed 0xAA byte)
+ CMP DISCCB+9      ; compare the current sector number to the skew
+ BCS #55
+ ADC DISCCB+9      ; if less, then add the skew
+ BRA #60
+55
+ SBC DISCCB+9      ; if greater, then subtract the skew-1
+ INCA
+60
+ TAX               ; X = next sector number
+ JSR ADDLEN        ; increment format buffer pointer by raw sector length
+ DEY               ; decrement the sector count
+ BNE #50           ; loop back until zero
+
+; for 16 sector per track this gives a sequence of
+;   0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15
+
+; for 17 sector per track this gives a sequence of
+;  0, 9, 1, 10, 2, 11, 3, 12, 4, 13, 5, 14, 6, 15, 7, 16, 8
+
+ LDAIM &A          ; 10 RETRYS (for recoveable errors)
+ STA RETRYS        ; store in the retry counter
+ JSR FDSDSL        ; Floppy side select
+
+ TXA               ; X = DxSIDE (set by FDSDSL)
+ BNE #75           ; branch if side 1
+
+ LDAIM &58         ; A = Step-In FDC Command
+ LDX DRIVE         ; X = drive number (0 or 1)
+ LDYAX DxTRCK      ; test track number (for drive X)
+ BNE #65           ; branch if not track zer0
+ LDAIM 8           ; replace with A = Restore FDC Command (==return to track 0)
+65
+ LDXIM :LSB:#70
+ LDYIM :MSB:#70
+ JMP FDCMDA        ; issue the FDC command to move to the right track...
+
+70                 ; ...and continue here
+ LDAIM DRERRH      ; BAD DRIVE
+ BCS #85           ; branch to return from OSWORD code if there was a error
+
+75
+ BIT TXCLR1        ; TX clear?
+ BPL #75           ; no, then wait for it to be clear to transmit
+
+ LDXIM :LSB:FMTINT ; Set new NMI handler to supply the format data
+ LDYIM :MSB:FMTINT
+ JSR FDNEWI
+
+ LDXIM 0
+ LDYIM 1           ; Y = 1
+ LDAIY DISCCB      ; Addr0 in control block (the buffer used for the format data)
+ STA FMTINS+1      ; Patch the LSB of the load instruction in the FMTINT NMI handler
+ INY               ; Y = 2
+ LDAIY DISCCB      ; Addr1 in control block (the buffer used for the format data)
+ STA FMTINS+2      ; Patch the LSB of the load instruction in the FMTINT NMI handler
+
+ LDAIM 3           ; Initialize the FLAG used to signal when the FDC command is complete
+ STA DISCCB+&C
+ LDYIM &F4         ; Y = Write Track FDC Command
+ STY FDCC          ; Write Y to the FDC command register
+ [ DEBUG = TRUE
+ STY FDCCMD
+ ]
+80
+ CMP DISCCB+&C     ; wait for the FDC command to complete
+ BEQ #80
+
+ JSR FDDEFI        ; set NMI vector back to "INT"
+ LDA FDCS          ; read the FDC status register
+ [ DEBUG = TRUE
+ STA HDSR  
+ ]
+ BITIM 4           ; test bit 2 (LOST DATA)
+ BNE #75           ; if set, then loop back and try again (this doesn't count as a retry)
+
+ BITIM &C0         ; test bit 7 (NOT READY) and bit 6 (WRITE PROTECT)
+ BEQ #87           ; branch if both clear
+
+ DEC RETRYS        ; decrement the retry count
+ BPL #75           ; if >= 0, then loop back and try again
+                   ; if < 0 then a exit with an error
+
+ JSR OWSTAT        ; Convert FDC status (in A) to an OSWORD &72 return value (in A)
+
+85
+ JMP OW72XX        ; return from OSWORD
+
+87
+ LDA DxSIDE
+ INCA              ; A = current side + 1
+ LDX DRIVE         ; X = drive number (0 or 1)
+ CMPAX DISCCB+13   ; compare A to the disk geometry: number of sides (1 or 2)
+ BCS #95           ; branch if A >= number of sides
+ STA DxSIDE        ; store updated side number
+90
+ JMP #35           ; loopback to format the next side/track
+95
+ STZ DxSIDE        ; zero side
+ LDAAX DxTRCK      ; A = track nummber (for drive X)
+ INCA              ; increment to the next track
+ CMPAX FCYLIN      ; compare A to the disk geometry: number of tracks
+ BCS FDVRFY        ; branch if we have done all the tracks
+ STAAX DxTRCK      ; store updated track number
+ BRA #90           ; loopback to format the next side/track
+
+                   ; fall through to
+
+
+; -------------------------------------------------------------------------------
+; OSWORD &72 Command E (Verify)
+;
+; On Entry:
+;   X = drive number (0 or 1)
+
+FDVRFY ROUT        ; OSWORD &72 Command &0E
+ JSR FDSWTR        ; Select Floppy Drive and Write Track register
+ STZAX DxTRCK      ; zero track number
+ LDAIM 8           ; A = Restore FDC Command (==return to track 0)
+10
+ LDXIM :LSB:#20
+ LDYIM :MSB:#20
+ JMP FDCMDA        ; issue the FDC command in A
+20                 ; ...and continue here
+ LDAIM DRERRH      ; BAD DRIVE
+ BCS #90           ; branch to return from OSWORD code if there was a error
+ STZ DxSIDE        ; zero the side number
+ LDX DRIVE
+ LDAAX DxTRCK      ; A = desired track
+ STA FDCTRK        ; write to the FDC track register
+30
+ JSR FDSDSL        ; Floppy Side Select
+ STZ PHYSEC        ; zero the desired sector
+ LDAIM 2
+ STA RETRYS
+40
+ LDA PHYSEC        ; A = desired sector
+ STA FDCSEC        ; write to the FDC sector register
+
+ LDXIM :LSB:VFYINT ; Set new NMI handler to supply the format data
+ LDYIM :MSB:VFYINT
+ JSR FDNEWI
+
+ LDX DxSIDE        ; X = side (0 or 1)
+ LDAAX TFSCMP      ; map side to value 0 or 8 in A (i.e. to bit 3)
+ ORAIM &82         ; A = FDC read sector command (bit 3 indicates the side compare value)
+ TAY               ; save command in Y
+ LDXIM 0
+ LDAIM 3           ; Initialize the FLAG used to signal when the FDC command is complete
+ STA DISCCB+&C
+ STY FDCC          ; issue the FDC command to read the sector
+ [ DEBUG = TRUE
+ STY FDCCMD
+ ]
+50
+ CMP DISCCB+&C     ; wait for the FDC command to complete
+ BEQ #50
+
+ PHX               ; save
+ JSR FDDEFI        ; set NMI vector back to "INT"
+ PLA               ; restore
+ BNE #70           ; branch if not zero
+
+ LDA FDCS          ; read the FDC status register
+ BITIM 4           ; test bit 2 (LOST DATA)
+ BNE #40           ; if set, then loop back and try again
+
+ BITIM &D8         ; test using mask 11011000 (Not Ready/Undefined/Record Not Found/CRC Error)
+ BEQ #60           ; branch of if all of these clear
+ DEC RETRYS        ; decrement the retry count
+ BPL #40           ; if >= 0, then loop back and try again
+                   ; if < 0 then a exit with an error
+ JSR OWSTAT        ; Convert FDC status (in A) to an OSWORD &72 return value (in A)
+ BRA #90           ; return from OSWORD
+60
+ INC PHYSEC        ; increment the sector number
+ LDA PHYSEC        ; compare the sector number
+ LDX DRIVE         ; X = drive number (0 or 1)
+ CMPAX FSECTR      ; agaist geometry: physical sectors per track for drive X
+ BCC #40           ; if less, then loop back
+
+ INC DxSIDE        ; increment the side number
+ LDA DxSIDE        ; compare the side nummber
+ CMPAX FSIDES      ; against the number of sides for drive X
+ BCC #30           ; if less, then loop back
+
+ LDAAX DxTRCK      ; increment the track number
+ INCA              ; compare the track nummber
+ CMPAX FCYLIN      ; against geometry: number of tracks
+ BCS #80           ; branch if greater or equal, to the successful exit point
+ STAAX DxTRCK      ; store the update track number
+ LDAIM &58         ; A = Step-In FDC Command
+ BRA #10           ; loop back, to handle the next track
+70
+ LDAIM DRERRD      ; return code SECTOR NOT FOUND
+ BRA #90
+80
+ LDAIM 0           ; return code SUCCESS
+90
+ JMP OW72XX        ; return from OSWORD
+
+
+; -------------------------------------------------------------------------------
+; Interrupt handlers for format and verify
+
+FMTINT ROUT
+ CMP FDCS          ; compare FDC status register to A (which contains 03)
+ BNE #30           ; branch if not BUSY + DRQ
+FMTINS
+ LDYAX &FFFF       ; Y = next byte from the format buffer (self modifying code)
+ INX               ; increment buffer index
+ BNE #10           ; branch if not zero
+ INC FMTINS+2      ; increment MSB of address in the above LDYAX instruction
+10
+ STY FDCD          ; store byte to the FDC data register
+20
+ LDY FDCS          ; read the FDC status register
+ CPYIM 1           ; compare against 01 (BUSY + ~DRQ)
+ BNE #30           ; branch if different
+ RTI               ; return from interrupt
+30
+ STZ DISCCB+&C     ; signal command complete via the FLAG
+ RTI               ; return from interrupt
+
+VFYINT
+ CMP FDCS          ; compare FDC status register to A (which contains 03)
+ BNE #30           ; branch if not BUSY + DRQ
+ BIT FDCD          ; read and discard the data register
+ INX               ; increment buffer indexed (don't think this is needed)
+ BRA #20           ; branch always
+
+
+; -------------------------------------------------------------------------------
+; Issue a single Floppy Disk Command
+;
+; This is used only for TYPE I ommands that don't require data, such as STEP, SEEK, RESTORE
+;
+; On Entry:
+;   A = command
+;   X = LSB of next address
+;   Y = MSB of next address
+;
+; On Exit:
+;   Intead of RTS, this code jumps to the address passed in X/Y
+
+FDCMDA ROUT
+ STX DISCCB+&A     ; store the "next address" passed in, for use by indirect JMP at the very end
+ STY DISCCB+&B
+ STZ DISCCB+&C     ; clear the FLAG use to signal command completion (or timeout) by the FDCINT NMI handler
+ LDX FDCS          ; read the FDC status register on entry
+ STX HDSR          ; and save the value just read
+ LDXIM :LSB:FDCINT ; Set X/Y to the FDCINT NMI interrupt handler just below
+ LDYIM :MSB:FDCINT
+ JSR INTCND        ; disable network use of NMI during disk accesses
+ STX NMIFD         ; patch in the FDCINT NMI handler into the main NMI handler (INT in MOS03)
+ STY NMIFD+1
+ [ DEBUG = TRUE
+ STA FDCCMD
+ ]
+ STA FDCC          ; write command to the FDC command register
+
+; the structure of the following code is a bit hard to follow. It's a timeout
+; loop that is exited early if FLAG (DISCCB+&C) is set to a value other than &00/&80
+
+ LDAIM &1E         ; timeout of &1E1E1E iteratons of 14 cycles @ 2MHz = 13.81 seconds
+ TAX
+ TAY
+10
+ DECA              ; inner delay loop - 2 cycles
+ BNE #20           ; inner delay loop - 3 cycles
+ DEX
+ BNE #20
+ DEY
+ BNE #20           ; this BNE only falls through if the FDC command does not complete
+                   ; within the timeout period
+
+ LDAIM &D0         ; A = FDC FORCE_INTERRUPT command
+ STA FDCC
+ LDAIM &BF         ; A = 10111111
+ STA DISCCB+&C     ; this will force the below ASL/BEQ to fall through with C = 1
+20
+ ASL DISCCB+&C     ; inner delay loop - 6 cycles ; shift bit 7 into C
+ BEQ #10           ; inner delay loop - 3 cycles ; this BEQ will fall as soon as FDCINT writes to DISCCB+&C
+ PHP               ; save C (C=0 indicates the command was successful)
+ JSR INTCNU        ; increment the interrupt depth count (this must be for debugging purposes, as it's never read back)
+ PLP               ; restore C
+ BCS #30           ; branch to exit code if C=1 (timeout or error case)
+ BIT HDSR          ; test the original FDC status register (this was saved before the command was issues)
+ BPL #30           ; branch to exit code if bit 7 (NOT READY) indicates the drive was READY
+ JSR FDWAIT        ; the drive was NOT READY, so wait a few seconds, or for index pulses to start
+30
+ JMI DISCCB+&A     ; pass control to address passed to FDCMDA in X/Y
+                   ; if these was a recoverable error, the higher level code will retry
+
+
+; -------------------------------------------------------------------------------
+; This is the NMI handler for Type I FDC Commands
+;
+; It's used by FDCMDA for FDC commands that don't require data to be transferred
+ 
+FDCINT ROUT
+ PHA                ; save A
+ LDA FDCS           ; read the FDC status register
+ RORA               ; test bit 0 (BUSY)
+ BCS #30            ; branch if BUSY set (indicating command still executing)
+ ROLA               ; undo the ROR A
+ BITIM &18          ; test bits 4 (RECORD NOT FOUND) and 3 (CRC ERROR)
+ BEQ #10            ; branch if both clear
+ [ DEBUG = TRUE
+ STA HDSR
+ ]
+ DEC DISCCB+&C      ; decrement FLAG from &00 to &FF, which signals command-failure to FDCMDA
+ BRA #20
+10
+ INC DISCCB+&C      ; increment FLAG from &00 to &01, which signals command-success to FDCMDA
+20
+ LDAIM :LSB:FDCNMD
+ STA NMIFD          ; reset the NMI handler to FDCNMD, which handles
+ LDAIM :MSB:FDCNMD  ; unexepected FDC NMI interrupts
+ STA NMIFD+1
+30
+ PLA                ; restore A
+ JMP FDCINC         ; FDCINC is in MOS03, and increments the interrupt depth count
+ 
+
+; -------------------------------------------------------------------------------
+; Set the format buffer pointer to (Addr0 + Addr1 << 8 + A)
+; (i.e. set it to offset A in the buffer)
+
+SETFBP ROUT
+ CLC
+ LDYIM 1           ; Y = 1
+ ADCIY DISCCB      ; add the LSB of the buffer (from the control block)
+ STA DISCCB+4      ; store in the LSB of the format buffer pointer
+ INY               ; Y = 2
+ LDAIY DISCCB      ; load the MSB of the buffer (from the control block)
+ ADCIM 0           ; add any carry from the first addition
+ STA DISCCB+5      ; store in the MSB of the format buffer pointer
+ RTS
+
+
+; -------------------------------------------------------------------------------
+; Add the length to the format buffer pointer
+
+ADDLEN ROUT
+ LDA BUFLEN        ; this is a standard 16-bit addition
+ CLC
+ ADC DISCCB+4
+ STA DISCCB+4
+ LDA BUFLEN+1    
+ ADC DISCCB+5
+ STA DISCCB+5
+ RTS
+
+
+; -------------------------------------------------------------------------------
+; Get the next byte of compressed format data, and increment the data pointer
+
+GETNXT ROUT
+ LDAI DISCCB+2     ; read the next byte of compressed format data
+ INC DISCCB+2      ; increment the LSB of the compressed format data pointer
+ BNE #10           ; branch if not zero
+ INC DISCCB+3      ; increment the MSB of the compressed format data pointer
+10
+ RTS
+
+ 
+; -------------------------------------------------------------------------------
+; Wait for three index pulses, or a 5-7 second timeout
+;
+; This is used if a FDC command failed, and the drive reported not
+; READY before the command.
+
+FDWAIT
+ LDXIM 3           ; number of DRQ pulses to wait for
+ LDAIM 2           ; mask for testing bit 1 (DRQ)
+ SEC               ; default to C=1 on exit (timed out)
+ LDY TIMER+1       ; TIMER is 100Hz; TIMER+ is every 2.56s
+ INY
+ INY
+ INY
+10
+ CPY TIMER+1       ; has ~5-8 seconds expired
+ BEQ #30
+ BIT FDCS          ; wait for INDEX to be one
+ BEQ #10
+20
+ CPY TIMER+1       ; has ~5-8 seconds expired
+ BEQ #30
+ BIT FDCS          ; wait for INDEX to be zero
+ BNE #20
+ DEX               ; decrement counter
+ BNE #10           ; loop back if not zero
+ CLC               ; set C=0 to indicate success
+30
+ RTS
+ 
+; -------------------------------------------------------------------------------
+; Compressed Format Data
+;
+; When uncompressed, this is the data that the FORMAT command needs to
+; format a track of 16 (or 17) 256b sectors.
+;
+; This is compressed using quite a clever two-level run-length
+; encoding, with zero counts as terminators
+;
+; The disk format used by the filestore is similar to the IBM SYSTEM 34
+; FORMAT 256 BYTES/SECTOR in WD2793 datasheet
+
+FHEAD
+ = &01             ; COUNT1         ; track
+ = &20             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 32 x 0x4E (Gap 1)
+ = &00             ;   COUNT2       ; terminator
+FTRCK
+ = &11             ; COUNT1         ; patched with the number of tracks
+ = &0C             ;   COUNT2
+ = &00             ;   VALUE        ; Write 12 x 0x00
+ = &03             ;   COUNT2
+ = &F5             ;   VALUE        ; Write  3 x 0xA1, Preset CRC
+ = &01             ;   COUNT2
+ = &FE             ;   VALUE        ; Write  1 x 0xFE (ID Address Mark)
+ = &03             ;   COUNT2
+ = &AA             ;   VALUE        ; Write  3 x 0xAA (Track/Side/Sector)
+ = &01             ;   COUNT2
+ = &01             ;   VALUE        ; Write  1 x 0x01 (Sector Length)
+ = &01             ;   COUNT2
+ = &F7             ;   VALUE        ; Generate/Write CRC *(2 CRC's written)
+ = &16             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 22 x 0x4E (Gap 2)
+ = &0C             ;   COUNT2
+ = &00             ;   VALUE        ; Write 12 x 0x00
+ = &03             ;   COUNT2
+ = &F5             ;   VALUE        ; Write  3 x Write A1, Preset CRC
+ = &01             ;   COUNT2
+ = &FB             ;   VALUE        ; Write  1 x 0xFB (Data Address Mark)
+ = &01             ;   COUNT2
+ = &FE             ;   VALUE        ; Write  1 x 0xFE (Sector Data)
+ = &03             ;   COUNT2
+ = &FF             ;   VALUE        ; Write  3 x 0xFF (Sector Data)
+ = &01             ;   COUNT2
+FSECT
+ = &03             ;   VALUE        ; Write  1x 0x00/0x03 (Sector Data 16/17 tracks)
+ = &FB             ;   COUNT2
+ = &00             ;   VALUE        ; Write 251 x 0x00 (Sector Data. 256b total)
+ = &01             ;   COUNT2
+ = &F7             ;   VALUE        ; Generate/Write CRC *(2 CRC's written)
+ = &2C             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 44 x 0x4E (Gap 3)
+ = &00             ;   COUNT2       ; terminator
+ = &01             ; COUNT1
+ = &FA             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 250 x 0x4E (Gap 4)
+ = &FA             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 250 x 0x4E (Gap 4)
+ = &FA             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 250 x 0x4E (Gap 4)
+ = &96             ;   COUNT2
+ = &4E             ;   VALUE        ; Write 150 x 0x4E (Gap 4)
+ = &00             ;   COUNT2       ; terminator
+ = &00             ; COUNT1         ; terminator
+
+ = &30             ; -> TRACK  - offset to track number byte in format buffer
+ = &31             ; -> SIDE   - offset to side number byte in format buffer
+ = &32             ; -> SECCNT - offset to sector number byte in format buffer
+ = &68             ; -> BUFLEN - low byte of raw sector length including all marks and gaps
+ = &01             ; -> BUFLEN + ONE - high byte of raw sector length including all marks and gaps
+
+FILL1
+ xFILL &FF, &FFE3-FILL1
+ 
+
+ LNK MOS07
+ 

@@ -1,0 +1,94 @@
+FileStore MOS ROM v1.23
+=======================
+
+This disc contains the source code for the Acorn FileStore E01 MOS ROM.
+
+Assembling the File Store Source Code
+======================================
+
+The source code will assemble on either a BBC with an Acorn Turbo (256K) 
+6502 Co-Processor and ADFS or on Arthur/RISC OS using the 6502 Turbo 
+Co-Processor emulator which is included here.
+To assemble on a BBC, use SHIFT-BREAK or *EXEC !BOOT. On RISC OS, double 
+clicking the file GO will start the process. The assembled file "MOSrom" will be
+placed in the root directory. The assembly process is significantly faster 
+when a hard drive is used instead of a floppy.
+
+Files
+=====
+
+\ $
+  !BOOT     - BBC Routine to set library and call MOSASM
+  GO        - RISC OS Routine to set library, load emulator and call MOSASM
+  MOSASM    - Loads TurboMasm and starts the MOS binary assembly
+  README    - This file
+
+\ LIBRARY
+  65ARTHURT - The Turbo Co-processor emulator for RISC OS
+  CB        - BASIC for the Turbo Co-processor
+  TURMASM   - Turbo version of MASM assembler
+
+\ MOS
+  The source code files  
+  MOSmake   - BASIC program to put together the assembed parts and create
+              the MOS ROM binary "MOSROM"
+  
+\ MOS\X
+  Location for the assembled parts. Do not delete or the assembler will fail.
+
+
+Version 1.23
+============
+
+Date - estimated August 1987. The last changes in the source code are dated 
+8 Aug 1987. The FileStore E01 is advertised in Acorn User magazine in July 
+1987 which may have been for pre-orders. The FileStore with serial number 0001
+had v1.23 fitted although that may have been a replacement for intial test
+firmware. The AcornUser show in 1987 was 23-26 July and may be where Acorn
+revealed the first machines.
+
+26/6/87 is when the pseudo directory symbols were added.
+24/7/87 
+8/8/87 appears to be the date of the last changes.
+
+Comments
+========
+The MOS source code has been recreated from scratch using sources which 
+included the DNFS source code. It creates a full matching binary, however,
+some of the variable and routine names are guesses.
+
+The FileStore MOS ROM appears to keep versioning in line with NFS versions.
+BBC NFS is 3.34, DNFS reports 3.60. This has 3.3C.
+
+The MOS ROM still has debug code present. This was probably due to leaving the
+assembler debug directive on before release code was produced.
+
+The original file server FSmake that puts together the assembled parts has been
+adapted to put together the MOS parts. It first writes a &FF byte from 0 to
+&6800 and then adds the assembled code to create a full 32K ROM file instead of
+only the assembled code.
+
+This is the initial release version of the FileStore E01 MOS ROM.
+
+==========================================================================
+ DRAWING /   |         TITLE                         | ISS | SHT |  LAST
+ NUMBER  /   |                                       |     |     | AMR/ECO
+=============|=======================================|=====|=====|========
+v1.23---------------------------------------------------------------------
+0254,204      E01 MOS ROM                               3     N/A ECO E369
+0254,204/SI   MOS HARNESS ROM SIS                       4     1   ECO 2161
+0254,204/DR   FS MOS HARNESSS CODE ROM OBJECT/SOURCE    1     N/A
+0254,205      E01 FS ROM                                4     N/A ECO E392
+0254,205/SI   FILESERVER CODE ROM SIS                   5     1   ECO 2161
+0254,205/DR   FS F'SERVER CODE ROM OBJECT/SOURCE DISC   1     N/A
+
+v1.??---------------------------------------------------------------------
+0254,202      E01 PRE FUNCTIONAL ROM                    1     N/A
+0254,202/DR   E01 PRELIMINARY FUNC TEST ROM SOURCE DISC 1     1   AMR B143
+0254,203      E01 FUNCTIONAL ROM                        2     1   AMR B143
+0254,203/DR   E01 FUNCTIONAL TEST ROM SOURCE DISC       1     N/A
+
+
+Changes
+=======
+No previous version to compare to.
