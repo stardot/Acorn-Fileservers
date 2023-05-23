@@ -610,15 +610,15 @@ GETLBH ROUT
 
 40 TAX
  LDYIM UTDISC+1 ;restore the old values
- [ $Level3 ; *********** B U G ******************
- STA USDISC+1
+ [ $Level3
+ LDA USDISC+1  ; BUG was STA USDISC+1
  |
  LDA USDISC+1
  ]
  STAIY USTPTR
  DEY
- [ $Level3 ; *********** B U G ******************
- STA USDISC
+ [ $Level3 
+ LDA USDISC    ; BUG was STA USDISC
  |
  LDA USDISC
  ]

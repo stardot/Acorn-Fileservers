@@ -142,8 +142,10 @@ USRMAN
          Uade06 Line 1143 comment change to retrieve root again without
                   to 1144 checking if it already has been
          Uade06 Line 1146 Clean up before doing the retrieve
-         Uade06 Line 1157 retrieve the previous user disc number
-         Uade06 Line 1159
+         Uade06 Line 1157 restore the previous user disc number
+         Uade06 Line 1159 *this introduced a bug which corrupted user disc
+                          number but has now been corrected.
+                          
 RNDMAN
 29/04/88 Rman02 Line 0160 Change file size. code moved to a subroutine
          Rman02 Line 0161 RDEXSZ in Rman04 to extend the file
