@@ -1,10 +1,11 @@
-FileStore ROMs v1.31
-====================
+FileStore MOS ROM 3.66
+======================
 
-This disc contains the source code for the Acorn FileStore E01 MOS ROM.
+This disc contains the source code for the Acorn FileStore E01 MOS ROM. This is
+the MOS to accompany the v1.33 FileServer ROM.
 
-Assembling the File Store Source Code
-======================================
+Assembling the MOS Source Code
+==============================
 
 The source code will assemble on either a BBC with an Acorn Turbo (256K) 
 6502 Co-Processor and ADFS or on Arthur/RISC OS using the 6502 Turbo 
@@ -39,12 +40,10 @@ Files
   Location for the assembled parts. Do not delete or the assembler will fail.
 
 
-Version 1.31
+Version 1.33
 ============
 
-Date - estimated 20/7/88. This was the latest date of a comment in the file
-server ROM code.
-The E01S first appeared in Technomatic adverts in Acorn User Jan 1989.
+Date - estimated Sep-Dec 1988.
 
 Comments
 ========
@@ -53,21 +52,13 @@ included the DNFS source code. It creates a full matching binary, however,
 some of the variable and routine names are guesses.
 
 The FileStore MOS ROM appears to keep versioning in line with NFS versions.
-BBC NFS is 3.34, DNFS reports 3.60. This has 3.3F.
-
-The MOS ROM still has debug code present. This was probably due to leaving the
-assembler debug directive on before release code was produced.
+BBC NFS is 3.34, DNFS reports 3.60. This has 3.66. The main changes appear to
+be around optimising the handling of interrupts.
 
 The original file server FSmake that puts together the assembled parts has been
 adapted to put together the MOS parts. It first writes a &FF byte from 0 to
 &6800 and then adds the assembled code to create a full 32K ROM file instead of
 only the assembled code.
-
-v1.31 was the first release for the revised Acorn FileStore E01S model.
-The E01S uses 1 x 64K ROM instead of 2 x 32K ROMs. There is no difference in
-the code between the two systems.
-
-v1.31 is not listed in Acorn parts list.
 
 Depending on the options used, the FS ROM can overflow the 32K ROM as was the
 case in later versions. There is space at the start of the MOS ROM for the
@@ -80,93 +71,52 @@ directory, and run the program under Turbo Hi-BASIC.
 CHAIN "MAKEROMS"
 
 
-Changes (from v1.23) (MOS)
-==========================
+Changes (from v3.3F / v1.31) (MOS)
+==================================
 
 HEADER FILE 1
-        MOS01   Line 0014 Version change from &3C to &3F
+        MOS01   Line 0013 Version change from 3.3F to 3.66
         MOS01   Line 0128 Some of the fast variables changed depending on
                      0139 page boundary overlaps for faster network code
-        MOS01   Line 0141 Debug directive turned off
      
 MOS INITIALISATION
-        MOS03   Line 0069 Removed copying of memory spaces 
-                          0000-01FF to E200-E3FF
-                          E600-E7FF to E400-E5FF
-        MOS03   Line 0140 Remove zeroing of 0100-01FF
-        MOS04   Line 0357 Code optimization, move code block to routine in MOS5
-        MOS04   Line 0502 Get Year and month
-                  to 0505 
-                Line 0514 Change century calculation
-                  to 0519
-        MOS04   Line 0555 Optimize reading date/time from memory
-                  to 0562
-        MOS04   Line 0584 Code optimization. Remove unnecessary cycles for 
-                  to 0587 STAYY instruction
-        MOS04   Line 0593 Change century calculation
-                  to 0606
-        MOS04   Line 0609 Optimise writing date code
-                Line 0613
-                Line 0617
-                Line 0621
-        MOS05   Line 0096 Code optimization, move code block to RXNEXT in MOS5
-                Line 0217 Add Get next RX block subroutine (RXNEXT)
-                  to 0228
- 
+        MOS03   Line 0162 Changed location of the Network NMI handler
+                     0164 Changed location of the Network NMI handler
+        MOS03   Line 0368 Setup new vector for NMI Handler           
+                     0370
+                     0377 Update to new Network NMI vector
+                     0380 Update to new NMI vector
+        MOS03   Line 0387 Update to new FDC NMI vector
+                Line 0458 Version string moved here
+        MOS04   Line 0579 Update to new Network NMI vector
+                     0581 Update to new Network NMI vector
+                Line 0665 Swapped the update status and disabling NVRAM
+                  to 0666 
+                Line 0681 Swapped the update status and disabling NVRAM
+                  to 0682                 
+        MOS05   Line 0211 Swapped the update status and disabling NVRAM
+                  to 0212 
+        NET01   Line 0018 Clear NSTATE at the start of Network NMI
+                Line 0044 Change the BDCAST test
+                Line 0052 
+                  to 0057
+                Line 0107
+                  to 0109
+                Line 0128 remove code turning off TX if a broadcast
+                  to 0133
+                Line 0137
+                Line 0252 Change the Network NMI handler to retry counter
+                  to 0257
+                Line 0467
+        NET02   Line 0153 Update the Network NMI with a new handler
+                  to 0154
+                Line 0547 
+
 FLOPPY DISK OPERATIONS
-        DOS01   Line 0084 Ensure a disk read takes place
-        DOS01   Line 0145 Get drive status for drive X before dropping into 
-                  to 0149 read write disk
-        DOS01   Line 0221 Get drive status first
-                  to 0227
-        DOS01   Line 0337
-                  to 0338
-        DOS01   Line 0340
-                  to 0350
-        DOS01   Line 0356
-        DOS01   Line 0408 change timeout counter to 2.75s
-                  to 0414 
-        DOS01   Line 0422 Force FDC interrupt if there is a timeout
-                  to 0423
-        DOS01   Line 0465 
-                  to 0466 
-        DOS01   Line 0468
-        DOS01   Line 0471 add a timeout loop
-                  to 0476
-        DOS01   Line 0561 Check for CRC Error
-                  to 0562
-        DOS01   Line 0565
-                  to 0568
-        
-HARD DISK OPERATIONS        
-        DOS02   Line 0021 Osword&72 entry. New check for SCSI HD
-                  to 0031
-        DOS02   Line 0099 Code optimization
-                  to 0100 
-        DOS02   Line 0146
-                  to 0152
-        DOS02   Line 0169
-                  to 0177
-        DOS02   Line 0193 change delay from 25us to 160us
-                  to 0198
-        DOS02   Line 0215 delay of 2 cycles
-                  to 0216
-        DOS02   Line 0220
-                  to 0223
-        DOS02   Line 0227
-                  to 0231
-        DOS02   Line 0236
-                  to 0285
-        DOS02   Line 0300 Allow for more than 1 hard drive
-                  to 0308
-        DOS02   Line 0313
-                  to 0317
-        DOS02   Line 0321
-        DOS02   Line 0327 On success, return with Y=0 
-                  to 0339 
-        DOS02   Line 0389
-                  to 0393 
- 
-OTHER DISK OPERATIONS
-        DOS03   Line 0466
-                  to 0467
+        DOS01   Line 0292 Update the default REC handler
+                Line 0295
+
+OTHER DISK OPERATIONS            
+        DOS03   Line 0408 Update the FDC NMI handler with the new address
+                  to 0409
+    

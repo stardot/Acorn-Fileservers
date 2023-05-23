@@ -4,6 +4,21 @@
 ;**********************************
 ;*        U T I L I T I E S       *
 ;**********************************
+
+; used to fill blank bytes with &value
+ MACRO
+$label xFILL $value,$end
+$label LCLA $addr
+
+$addr SETA 0
+ WHILE $addr < $end
+ = $value
+$addr SETA $addr + 1
+ WEND
+ MEND
+
+
+
  [ $Level3
 
 ENPT ROUT

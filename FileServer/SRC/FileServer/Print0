@@ -1,6 +1,7 @@
  OPT PRINT0 ;FILE > Print0
  TTL Print server file Print0
 
+
 ; PRWAIT macro enables the printer server to exit to the fileserver
 ; when it wishes to wait or loop.  The fileserver returns to the point
 ; after the call of PRWAIT when it next has nothing to do.
@@ -165,9 +166,13 @@ Pstart ROUT
  STA Lastin
  LDA Prxcb+4
  STA Lastin+1
+ 
+ [ 1=0
  LDA Prxcb+1 ;**20/5/87**
  ANDIM MCtask
  STA Lastin+2
+ ]
+ 
  JSR Pconnt ;refresh timeout
  JSR Prxcbi ;Then reissue receive
  STA Prxcb ;save CB number (or zero)
@@ -268,9 +273,12 @@ Pollps ROUT ;here every main idle cycle
  STA Lastin
  LDA CBstid+1
  STA Lastin+1
+ 
+ [ 1=0
  LDA CBflg ;**20/5/87**
  ANDIM MCtask
  STA Lastin+2
+ ]
  JSR Pconnt ;refresh timer
  LDAIM Prbusy ;and mark busy
  TSB Pstate
@@ -281,8 +289,11 @@ Pollps ROUT ;here every main idle cycle
  STA Prwork+1
  LDA Lastin+1
  STA Prwork+2
+ [ 1=0
  LDA Lastin+2
  STA Prwork+3
+ ]
+
 96 LDXIM 9
  LDYIM :LSB:(Prwork+3)
  LDAIM :MSB:(Prwork+3)
@@ -412,10 +423,13 @@ Prchks ROUT
  BNE #10
  LDA Prxcb+4
  CMP Lastin+1
+ 
+ [ 1=0
  BNE #10 ;**20/5/87**
  LDA Prxcb+1
  ANDIM MCtask
  CMP Lastin+2
+ ]
 10 RTS
 
 ; Check if new buffer is a "start print" buffer.  Returns Z set if so.

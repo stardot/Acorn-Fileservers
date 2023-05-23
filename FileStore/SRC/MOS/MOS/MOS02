@@ -66,8 +66,8 @@ SSTATE * &9F       ; STATION STATE CONTROL BLOCKS EXIST
 ; &A0 - &AF Econet workspace
 
  ^ &A0
-NMINET # 2         ; address of current network NMI handler
-NMIFD  # 2         ; address of current floppy drive NMI handler
+NMINET # 2         ; address of current network NMI handler - obsolete > v1.33
+NMIFD  # 2         ; address of current floppy drive NMI handler - obsolete > v1.33
 MSTATE # 1         ; Copy of the current machine state
 
 CNTLSB # 1         ; 3 byte loop counter

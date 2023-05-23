@@ -17,8 +17,8 @@ OSWRCH JMP WRCVEC  ; *** OSwrch *** &FFEE
 OSWORD JMP WORVEC  ; *** OSword *** &FFF1
 OSBYTE JMP BYTVEC  ; *** OSbyte *** &FFF4
 
-BYFFF7 = &00 
-SRSTV  = &00, &00
+BYFFF7 = &4C       ; JMP opcode *** &FFF7 
+SRSTV  = :LSB:SRESET, :MSB:SRESET ; &FFF8
 NMIV   = :LSB:INT,    :MSB:INT    ; &FFFA
 RSTV   = :LSB:HRESET, :MSB:HRESET ; &FFFC
 IRQV   = :LSB:IRQ,    :MSB:IRQ    ; &FFFE

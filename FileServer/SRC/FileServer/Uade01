@@ -62,10 +62,10 @@ Debug * 0 ;Make this +ve for debug letters
 
  [ $Level3
 Verla * "3" ;Version number & level
-Verlb * "1" ;Range 0-99  20/7/88
+Verlb * "3" ;Range 0-99  20/7/88
  |
 Verla * 1 ;Version number & level
-Verlb * 31 ;Range 0-99  20/7/88
+Verlb * 33 ;Range 0-99  20/7/88
  ]
 
 Lang * English
@@ -73,11 +73,7 @@ Mask * &3F ;protection state (&3F for service system)
 Yes * 0
 No * &FFFF
 Cachesw * No ; Disable big-buffer caching (ware use of BBUF for replies)
- [ $Level3
 Pseudods * No ; **18/2/88** Pseudo directory (%, &, @) switch
- |
-Pseudods * No ;
- ]
  
 ;*** MODULE CODE NAMES ***
 

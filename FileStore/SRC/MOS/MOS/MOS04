@@ -576,10 +576,10 @@ RDTIME ROUT
  BPL #20
 
  LDAIM :LSB:REC    ; Check the NMI handler routine
- CMP NMINET
+ CMP TXJUMP+1
  BNE #20
  LDAIM :MSB:REC
- CMP NMINET+1
+ CMP TXJUMP+2
  BNE #20
 
  LDXIM 7           ; Day 
@@ -662,8 +662,8 @@ CMclra
  PHA               ; preserve A
  LDA MSTATE        ; get current state from memory
  ANDIM &F7         ; LED FDCTST FDCRST FDCDEN -NVRAM FDSSEL DRV2 DRV1 
- STA ROMSWW        ; disable NVRAM access in hardware
  STA MSTATE        ; update status in memory
+ STA ROMSWW        ; disable NVRAM access in hardware
  JSR INTCNU
  PLA               ; restore A
  RTS
@@ -677,8 +677,8 @@ CMseta ROUT
  LDA MSTATE        ; get current state from memory
  ORAIM 8           ; LED FDCTST FDCRST FDCDEN +NVRAM FDSSEL DRV2 DRV1
 
- STA ROMSWW        ; enable NVRAM access in hardware
  STA MSTATE        ; update status in memory
+ STA ROMSWW        ; enable NVRAM access in hardware
 
  PLA
  RTS

@@ -627,7 +627,7 @@ CPDATE ROUT
 
  [ $CMOS
 VERSN = "FileStore "
- = "0"+VERLA, ".", "0"+VERLB/10, "0"+VERLB-VERLB/10*10, CR, 6
+ = "0"+VERLA, ".", "0"+VERLB/10, "0"+VERLB-VERLB/10*10, "   ", CR, 6
  ]
  
 CPVERN ROUT

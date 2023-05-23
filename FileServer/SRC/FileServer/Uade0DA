@@ -154,6 +154,17 @@ Tsparn ROUT ;**1/6/87**
 ; Retrieve parent directory **23/1/87**
 
 RETPAR ROUT
+ LDAIM :LSB:DRDISC
+ STA MOVFRM
+ LDAIM :MSB:DRDISC
+ STA MOVFRM+1
+ LDA UMHUFD
+  
+10 JSR FNDHND
+ BNE #55
+ JSR RDINOC
+ PHP
+ 
  JSR LOADDR ;**23/1/87** load current directory
  BNE #50
  LDYIM DRSTAR+DRLINK ;**23/1/87** special unchained entry?
@@ -178,6 +189,9 @@ RETPAR ROUT
  LDAIY DRUSIN
  ANDIM SYSTPV ;same as now if system user
  BNE #30
+ PLP
+ PHP
+ BEQ #20
  LDAIM 4 ;MAPMAN.SINOFROOT
  JSR SETDSA
  JSR MAPMAN ;**1/6/88** revised tests
@@ -200,10 +214,15 @@ RETPAR ROUT
 30 JSR LOADDR ;load parent directory
  BNE #50
  LDAIM 0
-50 RTS
+50 
+ PLP
+ PHA
+ PLA
+55 RTS
 
 60 LDAIM DRERRC ;parent not found
-70 JMP UNLOCK ;unlock and exit
+70 PLP
+ JMP UNLOCK ;unlock and exit
  
 TSTDIR ROUT
  JSR ISDIR ;Test CRNTEN for directory

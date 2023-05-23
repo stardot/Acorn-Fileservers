@@ -289,10 +289,10 @@ RWDISK ROUT
 
 65
  LDAIM :LSB:REC    ; compare the low byte of the network NMI handler against
- CMP NMINET        ; the default REC handler
+ CMP TXJUMP+1      ; the default REC handler
  BNE #65           ; different, so wait
  LDAIM :MSB:REC    ; compare the low byte of the network NMI handler against
- CMP NMINET+1      ; the default REC handler
+ CMP TXJUMP+2      ; the default REC handler
  BNE #65           ; different, so wait
 
 FDSEEK

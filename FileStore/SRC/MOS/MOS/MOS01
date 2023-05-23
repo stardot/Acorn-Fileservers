@@ -10,8 +10,8 @@
  CPU 1
  
 VERLA * "3" ; Major
-VERLB * "3" ; Minor
-VERLC * &3F
+VERLB * "6" ; Minor
+VERLC * "6"
 
 ;HARDWARE DEPENDANT CONSTANTS
 MCTYPE * &0B ; Filestore
@@ -126,13 +126,13 @@ NO     * FALSE
 ; Flags for fast code assembly
 
 FAST1  * TRUE
-FAST2  * TRUE
+FAST2  * FALSE
 FAST3  * TRUE
 FAST4  * TRUE
 FAST5  * TRUE
 FAST6  * TRUE
 FAST7  * TRUE
-FAST8  * TRUE
+FAST8  * FALSE
 FAST9  * TRUE
 FAST10 * FALSE
 FAST11 * TRUE

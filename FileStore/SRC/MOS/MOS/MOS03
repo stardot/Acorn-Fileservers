@@ -159,9 +159,9 @@ SRESET
  BNE #55
 
  LDAIM :LSB:REC    ; load address of the default Network NMI handler
- STA NMINET	   ; update the Network NMI handler to the default
+ STA TXJUMP+1      ; update the Network NMI handler to the default
  LDAIM :MSB:REC
- STA NMINET+1
+ STA TXJUMP+2
  
  LDAIM &28         ; TO DO <why is this set to &28
  STA INTOVR
@@ -169,9 +169,9 @@ SRESET
  STA INTCNT
  
  LDAIM :LSB:FDCNMD ; update the FDC NMI handler to the default
- STA NMIFD
+ STA FDCNMI+1
  LDAIM :MSB:FDCNMD
- STA NMIFD+1
+ STA FDCNMI+2
 
 ; initialise the FDC
 
@@ -357,47 +357,50 @@ NETPOLL
 ; Main interupt handler
 
 INT   ; NMI ints enter here program routed via rx/tx jump vector
- = &CE, :LSB:INTCNT, :MSB:INTCNT ; DEC INTCNT
+ DEC INTCNT
  BIT INTOFF        ; Disable NMI interupt
  BIT SReg1         ; is there a network interrupt?
   
  BPL FDCNMI        ; no, handle a FDC interrupt
  PHA               ; Save acumulator
  PHY               ; Save Y register
- JMI NMINET        ; Jump to receive or transmit wait address              
+
+TXJUMP
+RXJUMP             ; !!!!!!Self modifying code n.b. must be in RAM
+ JMP REC           ; Jump to receive or transmit wait address              
 
 ; Main routine that waits for tx interupt
 ; Returns from one int waits for another tx interupt
 
 WRXINT             ; Saves rx jump address
 WTXINT             ; Saves tx jump address
-  STYZ NMINET+1
+ STY TXJUMP+2      ; Store jump label
 WRXNTF             ; The fast version only stores the LOW byte
 WTXNTF
-  STAZ NMINET
+ STA TXJUMP+1
 WRXIN2             ; Use same jump address as last time
 WTXIN2             ; Use same jump address as last time
  PLY               ; Restore Y register
  PLA               ; Restore accumulator
 
 FDCNMI
- JMI NMIFD         ; Jump to receive or transmit wait address              
+ JMP FDCNMD        ; set initially with the default FDC NMI handler                    
 FDCNMD             ; but is changed dynamically  
  BIT FDCS  
 FDCINC             ; increment the interrupt depth counter
- = &EE, :LSB:INTCNT, :MSB:INTCNT ;INC INTCNT
+ INC INTCNT
  CMPI INTOVR
  RTI               ; Return to user process
 
 ; Decrease Interrupt Count
 INTCND
- = &CE, :LSB:INTCNT, :MSB:INTCNT ;DEC INTCNT
+ DEC INTCNT
  BIT INTOFF        ; DISABLE NMI INTERUPT
  RTS
  
 ; Increase Interrupt Count ;ENABLE NMI INTERUPT
 INTCNU
- = &EE, :LSB:INTCNT, :MSB:INTCNT ;INC INTCNT
+ INC INTCNT
  CMPI INTOVR       ; 
  RTS
 
@@ -451,7 +454,9 @@ IRQ ROUT
                    ; X=C RXSTP2
                    ; X=E RXSTR2
                    
-PRNTST = &0D       ; printer test string
+PRNTST = &0D, 00   ; printer test string
+VERSN = "Acorn Econet ",VERLA,".",VERLB,VERLC,0
+
 MCPEEK = MCTYPE    ; this gives the M/C info.
        = &00       ; always 0
 

@@ -209,8 +209,8 @@ OSBY80
  BCC #80           ; if MODE LED was on, turn off otherwise
  ORAIM LEDON       ; +LED FDCTST FDCRST FDCDEN NVRAM FDSSEL DRV2 DRV1
 80
- STA ROMSWW        ; set MODE LED to ON or OFF
  STA MSTATE        ; update status in memory
+ STA ROMSWW        ; set MODE LED to ON or OFF
 90
  RTS
 

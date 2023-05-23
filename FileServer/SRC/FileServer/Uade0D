@@ -169,6 +169,11 @@ CHKTEX ROUT
  BEQ #40 ;Nope => error
  CMPIM "$"
  BEQ #40 ;** 18/9/84 **
+ CMPIM "^"
+ BNE #30
+ CPXIM NAMLNT ;TEST LENGTH OF <text name>
+ BNE #40
+ 
 30 INY
  DEX
  BNE #10

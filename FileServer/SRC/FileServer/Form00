@@ -620,20 +620,15 @@ VERIFY ROUT
 FNSH
 LEFT * FRESTR-. ;get free store
  [ LEFT >= 0 ;must not overflow workspace
- |
- ! 0,"FRESTR incorrect"
+ 
+ ; if it is a ROM for the filestore, pad to the
+ ; end with &FF
+ [ $CMOS
+ xFILL &FF, LEFT
  ]
 
- [ $CMOS
-; The original ROM has some junk at the end.
-; but don't add if Psuedo = Yes
- [ Pseudods = No
- = &87, &D0, &02, &E6, &88, &C6 
- = &89, &80, &CB, &D0, &02, &E6, &88, &C6
- = &89, &80, &CB, &80, &CB, &90, &03, &EE 
- = &60, &81, &E6, &87, &D0, &02, &E6, &88
- = &C6, &89, &80, &CB, &14, &3F, &A5, &B4 
- ]
+ |
+ ! 0,"FRESTR incorrect"
  ]
 
 ;** T H E  E N D ***

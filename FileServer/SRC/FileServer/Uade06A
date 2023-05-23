@@ -208,7 +208,9 @@ USFREE ROUT ;** 6/2/85 **
  INC GENPTR+1
 
 30 INY
- CPYIM MAXID+UTUSID+1
+;Since v1.31 this has increased from &0E to &19.
+;neither MAXID or UTUSID has changed so &B is added
+ CPYIM MAXID+UTUSID+1+&B 
  BNE #20 ;continue
 
 40 LDAIM ARGD ;update the free space

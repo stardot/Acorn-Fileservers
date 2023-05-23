@@ -411,8 +411,8 @@ FDCMDA ROUT
  LDXIM :LSB:FDCINT ; Set X/Y to the FDCINT NMI interrupt handler just below
  LDYIM :MSB:FDCINT
  JSR INTCND        ; disable network use of NMI during disk accesses
- STX NMIFD         ; patch in the FDCINT NMI handler into the main NMI handler (INT in MOS03)
- STY NMIFD+1
+ STX FDCNMI+1      ; patch in the FDCINT NMI handler into the main NMI handler (INT in MOS03)
+ STY FDCNMI+2
  [ DEBUG = TRUE
  STA FDCCMD
  ]
@@ -476,9 +476,9 @@ FDCINT ROUT
  INC DISCCB+&C      ; increment FLAG from &00 to &01, which signals command-success to FDCMDA
 20
  LDAIM :LSB:FDCNMD
- STA NMIFD          ; reset the NMI handler to FDCNMD, which handles
+ STA FDCNMI+1       ; reset the NMI handler to FDCNMD, which handles
  LDAIM :MSB:FDCNMD  ; unexepected FDC NMI interrupts
- STA NMIFD+1
+ STA FDCNMI+2
 30
  PLA                ; restore A
  JMP FDCINC         ; FDCINC is in MOS03, and increments the interrupt depth count

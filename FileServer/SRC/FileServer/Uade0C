@@ -225,11 +225,12 @@ DRRET2 LDYIM ARGH
  STAIY INFPTR
  DEY
  BPL #22
- [ $CMOS  ; This looks like a bugfix in Filestore 1.31 but not included in the L3 code
+ ;[ $CMOS  ; This looks like a bugfix in Filestore 1.31 but not included in the L3 code
  LDA DATE ;set date to today (????????)
  STA TDATE
  LDA DATE+1
  STA TDATE+1
+ [ $CMOS  
  BRA #05 ;**23/1/87** complete info entry a la root
  |
  BMI #05 ;**23/1/87** complete info entry a la root
@@ -246,12 +247,12 @@ DRRET2 LDYIM ARGH
  BNE #27
  JSR LOADDR ;**20/5/87** load directory
  BNE #60
- [ $CMOS  ; This looks like a bugfix in Filestore 1.31 but not included in the L3 code
+; [ $CMOS  ; This looks like a bugfix in Filestore 1.31 but not included in the L3 code
  LDA DATE ;set date to today (????????)
  STA TDATE
  LDA DATE+1
  STA TDATE+1
- ]
+ ;]
 
  |
  [ $CMOS
